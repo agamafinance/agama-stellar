@@ -193,7 +193,7 @@ pool2() {
   local id
   id=$(stellar contract invoke --quiet --id "$(get blend.poolFactory)" --source "$SRC" \
     --network "$NET" -- deploy --admin "$ME" --name '"Agama Stocks"' \
-      --salt "$(salt_of lending-pool/v2)" --oracle "$(get contracts.oracle)" \
+      --salt "$(salt_of lending-pool/v3)" --oracle "$(get contracts.oracle)" \
       --backstop_take_rate 0 --max_positions 4 --min_collateral 0 | tr -d '"')
   put blend.pool "$id"
   note "pool $id"

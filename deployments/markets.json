@@ -110,7 +110,7 @@
     {
       "symbol": "SPYx",
       "name": "S&P 500",
-      "feed": "SPY",
+      "feed": "SPY---PRE_AFTER",
       "kind": "share",
       "ltv": 7000,
       "threshold": 8000,
@@ -121,7 +121,7 @@
     {
       "symbol": "BENJI",
       "name": "Franklin OnChain U.S. Government Money Fund",
-      "feed": "BENJI",
+      "feed": "BENJI_ETHEREUM_FUNDAMENTAL",
       "kind": "fund",
       "ltv": 7000,
       "threshold": 8000,
@@ -141,5 +141,5 @@
       "redstone": "XAU"
     }
   ],
-  "redstoneNote": "The on-chain feed id must be the name inside the signed payload. RedStone carries SPY only as SPY---PRE_AFTER and BENJI as BENJI_ETHEREUM_FUNDAMENTAL; the live oracle was bound to SPY and BENJI before that was known and has no retarget path, so those two stay admin-priced. retarget_feed exists in the source for the next one."
+  "redstoneNote": "The on-chain feed id is the name inside the signed payload, not the ticker. RedStone carries SPY only as SPY---PRE_AFTER, BENJI as BENJI_ETHEREUM_FUNDAMENTAL and gold as XAU. Binding the oracle to the ticker instead is what left two markets admin-priced in the first deployment."
 }
