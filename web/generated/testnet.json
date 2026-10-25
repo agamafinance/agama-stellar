@@ -1,0 +1,163 @@
+{
+  "wasm": {
+    "comet": "5d721fa580714291f6846fc01738e86d70acb47e449ea75312e272a0f7436dd8",
+    "cometFactory": "bf7adb09076853eb3aa569278754111d86e161e35e7dc6a984ecde2b9d6700ae",
+    "blendPool": "a41fc53d6753b6c04eb15b021c55052366a4c8e0e21bc72700f461264ec1350e",
+    "emitter": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
+    "backstop": "c1f4502a757e25c611f5a159bc1ab0eef64085adac6c68123dca66e87faffbc2",
+    "blendPoolFactory": "31328050548831f63d2b72e37bcfd0bb7371b7907135755dbe09ed434d755ca9",
+    "stock": "8ae9a825a407bb8b1850431cdbf534c56f0c1672e6d4a8994cdc638fcefafab3",
+    "oracle": "4fbe890c5e23489a8baec46d23395cbc2aa7dc3bfd4954c5b25ccb20cbb5824f",
+    "position": "95f27c5c20a6a18ded2474a064a45ea57883e2836cd5c8e2614ae0f819f6e469",
+    "vault": "7ed1ffbce1f7ba4ed4a5ad78ba6e196aa8892e0141c41cac77847983bc9744c3",
+    "core": "e7d747c1ed62cbc5884f72dbada8300291458f15f828054c2cbcae4047889e90"
+  },
+  "contracts": {
+    "oracle": "CBTNXB4KM4UKW25Z6UF22FOABSYS6AFJP34Y4DXBCLIQNYVPK255PJ6M",
+    "vault": "CCVVFPL5ZUTBEKJYS4AGRPFHLOO42TPTUMACHXBQPUW3YTZ23AIAE5GF",
+    "core": "CBT6PZFSMT7D6K7L25QRFXACF7U5EHZA7II7KIOR7FREF3XB2SAZYAFD"
+  },
+  "blend": {
+    "usdc": "CD5IKHINGOCVAOZPWD4R5R7FVAAZBCZOVQJVGIGI7XMYESK3CVGUVDSL",
+    "blnd": "CCEJQFQMNSEFASLS2FQ7HMRLNBI72U54AHF343UGI45Y22S2NHHH2CJ3",
+    "cometFactory": "CDFZ5K3DOCZDVYRPCPHBGWFL5R35JL6K7ZEUYA4KCS762ZZXOHIA2ALP",
+    "comet": "CCDBD2IYROKXE3AUJ22XFRHHY6SUBCOTUM2SQJLZP33KKPZLJLWYANMP",
+    "emitter": "CDYXU3O3K3F57TY757RWPXTFJ7PJKPCOEHB57VVOO4PYI4THXZPIBZD5",
+    "backstop": "CASS56APDOL6RPC46QBK72SMAVZ3CMV3U4RQL74LXO5K3KHXXHQG23K6",
+    "poolFactory": "CANWFYTMGRBRWDS65CY3CLHC5YHMLJPPSHNUOXWL5R76A6WSCJV6EOEI",
+    "pool": "CCNJ6D3ITLT22QCVNTD3AVEY4ANE3FYXSKIQTLFXTLPOSPWLWWTPHCCG",
+    "reserves": {
+      "USDC": "0",
+      "TSLAx": "1",
+      "NVDAx": "2",
+      "AAPLx": "3",
+      "MSFTx": "4",
+      "AMZNx": "5",
+      "GOOGLx": "6",
+      "METAx": "7",
+      "SPYx": "8",
+      "BENJI": "9",
+      "GOLDx": "10"
+    },
+    "backstopFunded": "yes"
+  },
+  "abandoned": {
+    "why": "The first pass pointed at Blend's shared testnet instance, whose backstop cannot be funded by us, so its pool could never leave supply-only. The stock tokens from that pass are unusable too: their admin was handed to that core and a token admin cannot be taken back.",
+    "firstPass": {
+      "pool": "CCTRZCUKU7XF4K764ODLSTWDBBXOA3KHCICA2FJRBC2KAM6JLF7AWG4A",
+      "core": "CDUE6CG3LCSFIYXKWDT5CEAEL6AGVLUYYGTBZ23VJ5BIT7O2OAX3GHPC",
+      "stocks": {
+        "TSLAx": "CCCCRA67FLW75ZXB3TCPKIHCVU4EMX2OW6B62ZQWZIY6ZF4VY4IUPRIJ",
+        "NVDAx": "CBI4Z3PHV6EIM4HD7APIUCKDPCXSGFJEMGQNXLBN7SCQIBU77TPORN73",
+        "AAPLx": "CB2OIETJJCENDYJPSSLQTQ7T2HLME2ZB4VYFMBKQBDOFQWKOJKELVT4L",
+        "MSFTx": "CC6JB2YE4Y44RY3DUTSBNQDA4FEZ4ZUK5PGQCI3O3TQNMG2BZTH6TG47",
+        "AMZNx": "CC6PTYWO3RUIIW6N2PEQNUKJN5G4VNYTUTON5ACDVQKGTKAN5ZXEEFN5",
+        "GOOGLx": "CAZ7NGALDYHZYPFJGSVWSTQWGCI7ESFJWWXQRCYHR4CDVFINGLXTKM5U",
+        "METAx": "CDBRLCTAU5LT75EV5YZPXZZYRSR264243YRBXSEVCUIOYEK7LIVYA3B7",
+        "SPYx": "CDVH5VMW2F26KOTHHHSSW7LDZP7JWOXOE2IEUCIMWVHUNCHMI4VZEOHB",
+        "BENJI": "CBHO3BGY7E3JJDARJ5NLSA2VXXH27XB5QKYEVQMR3RQITNTVAVVB23DI",
+        "GOLDx": "CDKPMO4HEI3SHTJRHGRPWKEQL4ZO7MPLNYHLBPV4VYK3MSMZAB2Y57OS"
+      },
+      "reserves": {
+        "USDC": "0",
+        "TSLAx": "1",
+        "NVDAx": "2",
+        "AAPLx": "3",
+        "MSFTx": "4",
+        "AMZNx": "5",
+        "GOOGLx": "6",
+        "METAx": "7",
+        "SPYx": "8",
+        "BENJI": "9",
+        "GOLDx": "10",
+        "agUSDC": "11"
+      },
+      "markets": {
+        "TSLAx": "1",
+        "NVDAx": "2",
+        "AAPLx": "3",
+        "MSFTx": "4",
+        "AMZNx": "5",
+        "GOOGLx": "6",
+        "METAx": "7",
+        "SPYx": "8",
+        "BENJI": "9",
+        "GOLDx": "10"
+      },
+      "poolV1": "CAJRNCZYT5H4BKSJHGWCEW7GLUFTKNQOPRZQ3YL2EPFM6DK46JS4HHB2",
+      "poolV1Why": "Switched on before its reserves were complete. Blend timelocks a reserve queued against a live pool for one week, so its asset list was frozen with the abandoned stock tokens in it."
+    },
+    "secondPass": {
+      "why": "Deployed before the contracts had an upgrade path, so fixing anything in them meant replacing them. Three things made that worth doing at once: Amplify borrowed once against the deposit instead of reaching the multiple, the oracle was bound to tickers RedStone does not publish under, leaving two markets admin-priced, and neither contract could be fixed in place.",
+      "core": "CCCYGJTBIXYUYEPHHKHPRBW7WDGKDGCKNYZXLLRZ5BDL7ZMU7VHB6VHS",
+      "oracle": "CAT7PIXJBRPMANBDGJTYHJL3VERMBZN4LRJUEFCUUVI75SPL3RB2BOSN",
+      "vault": "CDYMFEFFPNJM4AT5CNUYJP3BYD2TX24MEU3QG4OWOL6QNK2XSLP2ZBUM",
+      "pool": "CA3EXQA2DTONIIHWYF77S3WMSSIW55GWAK6CNEJKSTHHJT55F4U6CE5W",
+      "stocks": {
+        "TSLAx": "CAV7BDKUZYUHURG2XXWFAFCKCIXUJFKCGIPYK2GBWM4H4L456YXLK3XJ",
+        "NVDAx": "CAE44AI7UDNLTBZZJXJGFMZL25VWNTSWCMTD4BQLKAK2ZRU47ROV2X4K",
+        "AAPLx": "CBII6GNCM77NSQXNZS2XM3K6MNQYTAINJ3MMKNJBFIHY6SNLVODUDYZB",
+        "MSFTx": "CBGAXN64LLWVSRKA5DKMYPGFVS5IFD6MGPCXJYSMSKE2AITQR6YOUUJC",
+        "AMZNx": "CAFX42KAN2FIS4ZUR6PZD53ZSGPDME4TLBVMDVBQOUG6VTHWPOOBVY53",
+        "GOOGLx": "CDVOLTKASKFLTMZEDN6KSTZZV2UZOOPL5CDLLNK573OO77IP6THMNAG3",
+        "METAx": "CCZGRSNKOU5W43HJZLO3KN6B4U5QIQ6IET6DT3MSL7MGYFPQAD7AG22O",
+        "SPYx": "CBK5PMPDKBQASODDINEG2N5GZ2BMZH6RH2M4F4WPVV4ZNOHJAQULZAVC",
+        "BENJI": "CDXKPKXETWJP7ZQCAQD7BKVE36A6L3O52WEMZE37FTME7UL2XHPVIIGX",
+        "GOLDx": "CCO3ULVRN2JJNXMOMUJPXHL4GUNFO62PKQCQGM7RWKKZX4DII6IYTGUJ"
+      },
+      "reserves": {
+        "USDC": "0",
+        "TSLAx": "1",
+        "NVDAx": "2",
+        "AAPLx": "3",
+        "MSFTx": "4",
+        "AMZNx": "5",
+        "GOOGLx": "6",
+        "METAx": "7",
+        "SPYx": "8",
+        "BENJI": "9",
+        "GOLDx": "10"
+      },
+      "markets": {
+        "TSLAx": "1",
+        "NVDAx": "2",
+        "AAPLx": "3",
+        "MSFTx": "4",
+        "AMZNx": "5",
+        "GOOGLx": "6",
+        "METAx": "7",
+        "SPYx": "8",
+        "BENJI": "9",
+        "GOLDx": "10"
+      }
+    }
+  },
+  "stocks": {
+    "TSLAx": "CAH4TV2YO3SQ4KEVEQEUKFDDHHDCVDWBGLBGXFF6C5ZPYF7HH5GXVE4Y",
+    "NVDAx": "CAJWQP6AK2LDCYVOVSBEJO4S3DWB65YFMMGAZHMNKB2FSHTYQFLUXJRJ",
+    "AAPLx": "CCCKJXVYH7WWICFN4LGTWBEGTHCM7DPNSD4APEEF23DGWTI5M3BKA4HP",
+    "MSFTx": "CBLTILNRY6UYM6SHOXLJ26IR7BA3FMLL3ASF5IQV24NZAM4NASNEUULK",
+    "AMZNx": "CBVYYQLKB2AZHH26LV4YPH4IWMHR64C7SKA2LP4N32JT23OSXFOA4IU7",
+    "GOOGLx": "CAODLZQTURUJXONHROU3Y4YOUMWPZQDSO4ZXNFPNYJKCW2YGQK7JUKIS",
+    "METAx": "CAM5ATFUBP3M5DEWZM5XXZ4N7MZCEWYDEAGZ3OUCFRHHPWAGR3CL2TOA",
+    "SPYx": "CBJJL3Q6PJXOCS2DMX2MNT2FFLS27NVFNVWT3O4KKJLPAH7QA6NNKVY2",
+    "BENJI": "CCZKFKOXZINGQG7W7R6USJS3SPUSDCJHIX74NWCWC7KIO7DWLF4NSTTN",
+    "GOLDx": "CAVD2C3UY2VA34DHIBURFNWURRNH6TJAVWXE7DMJ25W6OBLTTGTQBVXP"
+  },
+  "markets": {
+    "TSLAx": "1",
+    "NVDAx": "2",
+    "AAPLx": "3",
+    "MSFTx": "4",
+    "AMZNx": "5",
+    "GOOGLx": "6",
+    "METAx": "7",
+    "SPYx": "8",
+    "BENJI": "9",
+    "GOLDx": "10"
+  },
+  "seed": {
+    "supplied": "yes",
+    "buffer": "yes"
+  }
+}
