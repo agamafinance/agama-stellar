@@ -173,19 +173,6 @@ pub struct AgentRan {
     pub delta: i128,
 }
 
-/// The slice of the Agama vault this protocol uses. Deposits are immediate and
-/// withdrawals are a queue, which is the whole reason the buffer exists.
-mod vault {
-    use soroban_sdk::{contractclient, Address, Env};
-    // The trait is never called; it exists so the macro writes the client.
-    #[allow(dead_code)]
-    #[contractclient(name = "VaultClient")]
-    pub trait Vault {
-        fn deposit(e: Env, from: Address, amount: i128) -> i128;
-        fn request_withdrawal(e: Env, from: Address, amount: i128) -> u64;
-    }
-}
-
 /// The slice of the oracle this protocol uses: SEP-40's `lastprice`.
 mod oracle {
     use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol};
@@ -211,7 +198,6 @@ mod oracle {
 
 use oracle::{Asset, OracleClient};
 use position::Client as PositionClient;
-use vault::VaultClient;
 
 #[contract]
 pub struct Core;
@@ -561,10 +547,11 @@ impl Core {
     /// never holding idle cash between two calls.
     fn borrow_into_vault(e: &Env, p: &PositionClient, amount: i128) {
         let vault: Address = e.storage().instance().get(&Key::Vault).unwrap();
-        let usdc = Self::usdc(e);
         p.borrow(&amount, &p.address);
-        p.approve(&usdc, &vault, &amount, &(e.ledger().sequence() + DAY));
-        VaultClient::new(e, &vault).deposit(&p.address, &amount);
+        // The position calls the vault, not us: the vault asks the depositor
+        // to authorise, and the position can only say so from inside its own
+        // frame.
+        p.vault_deposit(&vault, &amount);
     }
 
     pub fn earn_set_target(
@@ -629,7 +616,7 @@ impl Core {
         p.repay(&amount);
 
         let vault: Address = e.storage().instance().get(&Key::Vault).unwrap();
-        VaultClient::new(e, &vault).request_withdrawal(&p.address, &amount);
+        p.vault_request(&vault, &amount);
         Ok(())
     }
 
@@ -653,32 +640,16 @@ impl Core {
             return Ok(0);
         }
 
-        let bought = Self::buy_stock(&e, &m, &p.address, cash, price);
+        // The position hands the dollars over rather than the core pulling
+        // them: a pull would need an allowance, and an allowance standing
+        // between a position and the core is a thing somebody has to maintain.
+        p.send(&usdc, &e.current_contract_address(), &cash);
+        let bought = Self::buy_stock_from_core(&e, &m, &p.address, cash, price);
         p.supply(&bought);
 
         p.touch(&agent, &symbol_short!("compnd"));
         AgentRan { agent, position, action: symbol_short!("compnd"), delta: 0 }.publish(&e);
         Ok(bought)
-    }
-
-    /// The stand-in for a venue: dollars in, stock out, at the oracle price.
-    /// The core is the stock's admin on testnet, so it mints; the dollars stay
-    /// here against the day the token is real and this becomes a route.
-    fn buy_stock(e: &Env, m: &Market, holder: &Address, usdc_amount: i128, price: i128) -> i128 {
-        let usdc = Self::usdc(e);
-        token::Client::new(e, &usdc).transfer_from(
-            &e.current_contract_address(),
-            holder,
-            &e.current_contract_address(),
-            &usdc_amount,
-        );
-        let units = usdc_amount * UNIT / price;
-        e.invoke_contract::<()>(
-            &m.token,
-            &Symbol::new(e, "mint"),
-            Vec::from_array(e, [holder.into_val(e), units.into_val(e)]),
-        );
-        units
     }
 
     /// Close: repay everything out of the buffer, take the collateral back,
@@ -754,7 +725,10 @@ impl Core {
         Ok(pos)
     }
 
-    /// Same stand-in as `buy_stock`, for dollars the core is already holding.
+    /// The stand-in for a venue: dollars the core is holding turn into stock at
+    /// the oracle price. The core is the stock's admin on testnet, so it mints;
+    /// the dollars stay here against the day the token is real and this becomes
+    /// a route.
     fn buy_stock_from_core(
         e: &Env,
         m: &Market,

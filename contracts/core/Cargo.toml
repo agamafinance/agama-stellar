@@ -14,3 +14,8 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+# The real stock and oracle, not mocks: the core's job is to decide, and a
+# decision tested against a stand-in for the thing it decides about is a test
+# of the stand-in.
+stock = { path = "../stock" }
+oracle = { path = "../oracle" }

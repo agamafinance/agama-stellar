@@ -20,12 +20,29 @@
 //! here that exists nowhere else.
 
 use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
-    Symbol, Vec,
+    IntoVal, Symbol, Vec,
 };
 
 mod blend {
     soroban_sdk::contractimport!(file = "../../vendor/blend_pool.wasm");
+}
+
+/// The slice of the Agama vault a position touches. The position is the one
+/// that calls it, never the core: `deposit` and `request_withdrawal` both ask
+/// the depositor to authorise, and a contract's authorisation is automatic
+/// only for the call it makes itself. Routed through the core, the position is
+/// not in the call stack at all when the vault asks, and nothing it could have
+/// said in advance would still be standing.
+mod vault {
+    use soroban_sdk::{contractclient, Address, Env};
+    #[allow(dead_code)]
+    #[contractclient(name = "VaultClient")]
+    pub trait Vault {
+        fn deposit(e: Env, from: Address, amount: i128) -> i128;
+        fn request_withdrawal(e: Env, from: Address, amount: i128) -> u64;
+    }
 }
 
 /// Blend's own request codes, read off blend-contracts-v2/pool/src/pool/actions.rs.
@@ -147,6 +164,44 @@ impl Position {
         )
     }
 
+    /// Let the pool pull `amount` of `asset` out of here.
+    ///
+    /// This is the part of being a contract borrower that is not obvious. When
+    /// a person supplies or repays, their signature covers the whole tree and
+    /// the pool's `transfer` out of their account is inside it. A contract has
+    /// no signature: its authorisation is automatic only for the call it makes
+    /// itself, one frame deep. The pool's transfer is two frames deep, so it
+    /// is refused, as Error(Auth, InvalidAction) at the token and reported at
+    /// `submit`, which points at the wrong place entirely.
+    ///
+    /// So the position says in advance exactly which transfer it is willing to
+    /// have made on its behalf: this token, this amount, to this pool, and
+    /// nothing else. It is not a blanket approval, it is the one invocation.
+    fn allow_pull(e: &Env, asset: &Address, amount: i128) {
+        let pool: Address = e.storage().instance().get(&Key::Pool).unwrap();
+        Self::allow_transfer(e, asset, &pool, amount);
+    }
+
+    /// The same, for any counterparty that pulls rather than is pushed to.
+    fn allow_transfer(e: &Env, asset: &Address, to: &Address, amount: i128) {
+        let pool = to.clone();
+        let me = e.current_contract_address();
+        e.authorize_as_current_contract(Vec::from_array(
+            e,
+            [InvokerContractAuthEntry::Contract(SubContractInvocation {
+                context: ContractContext {
+                    contract: asset.clone(),
+                    fn_name: Symbol::new(e, "transfer"),
+                    args: Vec::from_array(
+                        e,
+                        [me.into_val(e), pool.into_val(e), amount.into_val(e)],
+                    ),
+                },
+                sub_invocations: Vec::new(e),
+            })],
+        ));
+    }
+
     // ---- the four things this says to Blend ----
 
     /// Put stock already held here up as collateral.
@@ -157,6 +212,7 @@ impl Position {
         }
         let stock: Address = e.storage().instance().get(&Key::Stock).unwrap();
         let me = e.current_contract_address();
+        Self::allow_pull(&e, &stock, amount);
         Self::pool(&e).submit(&me, &me, &me, &Self::request(&e, &stock, amount, SUPPLY_COLLATERAL));
         Ok(())
     }
@@ -186,6 +242,7 @@ impl Position {
         }
         let usdc: Address = e.storage().instance().get(&Key::Usdc).unwrap();
         let me = e.current_contract_address();
+        Self::allow_pull(&e, &usdc, amount);
         Self::pool(&e).submit(&me, &me, &me, &Self::request(&e, &usdc, amount, REPAY));
         Ok(())
     }
@@ -203,6 +260,32 @@ impl Position {
             token::Client::new(&e, &stock).transfer(&me, &to, &amount);
         }
         Ok(())
+    }
+
+    // ---- the vault leg ----
+
+    /// Put dollars held here into the Agama vault. The position calls, so the
+    /// vault sees it as the depositor and the shares are the position's.
+    pub fn vault_deposit(e: Env, vault: Address, amount: i128) -> Result<i128, Error> {
+        Self::guard(&e);
+        if amount <= 0 {
+            return Err(Error::BadAmount);
+        }
+        let usdc: Address = e.storage().instance().get(&Key::Usdc).unwrap();
+        let me = e.current_contract_address();
+        Self::allow_transfer(&e, &usdc, &vault, amount);
+        Ok(vault::VaultClient::new(&e, &vault).deposit(&me, &amount))
+    }
+
+    /// File a withdrawal against the vault. It does not pay out here; it joins
+    /// a queue and settles later, which is why the core keeps a buffer.
+    pub fn vault_request(e: Env, vault: Address, amount: i128) -> Result<u64, Error> {
+        Self::guard(&e);
+        if amount <= 0 {
+            return Err(Error::BadAmount);
+        }
+        let me = e.current_contract_address();
+        Ok(vault::VaultClient::new(&e, &vault).request_withdrawal(&me, &amount))
     }
 
     // ---- moving what is loose ----
