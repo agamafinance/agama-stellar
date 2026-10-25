@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Everything, checked in one pass.
 #
-# Four layers, in the order they depend on each other: the contracts' own
-# tests, a whole position's life on chain, the keeper that feeds and tends it,
-# and the app that reads it back. A green run means the thing works from a
-# Rust assertion all the way to an HTTP response.
+# Five layers, in the order they depend on each other: the contracts' own
+# tests, both products' whole life on chain, the keeper that feeds and tends
+# them, and the app that reads it all back. A green run means the thing works
+# from a Rust assertion all the way to an HTTP response.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -54,7 +54,7 @@ import json;print(json.load(open('deployments/testnet.json'))['contracts']['core
   --source agama --network testnet -- markets | python3 -I -c "import json,sys;print(len(json.load(sys.stdin)))")
 if [ "$MKTS" = "10" ]; then ok "10 markets registered"; else bad "$MKTS markets"; fi
 
-say "3. A whole position, on chain"
+say "3. An Earn, on chain"
 if ./scripts/e2e.sh >/tmp/agama-e2e.log 2>&1; then
   ok "deposit, rise, fall, yield, compound, close"
   grep -E "^  (collateral|debt at|not one share|buffer paid|bought|returned)" /tmp/agama-e2e.log \
@@ -64,7 +64,17 @@ else
   tail -5 /tmp/agama-e2e.log | sed 's/^/    /'
 fi
 
-say "4. The keeper"
+say "4. An Amplify, on chain"
+if ./scripts/amplify-e2e.sh >/tmp/agama-amp.log 2>&1; then
+  ok "a multiple asked for, reached, held through a move, and unwound"
+  grep -E "^  (stock held|borrowed to buy|LTV |exposure|and it held|kept |started with)" /tmp/agama-amp.log \
+    | sed 's/^/    /'
+else
+  bad "the amplify run failed, see /tmp/agama-amp.log"
+  tail -5 /tmp/agama-amp.log | sed 's/^/    /'
+fi
+
+say "5. The keeper"
 if python3 keeper/run.py prices >/tmp/agama-prices.log 2>&1; then
   SIGNED=$(grep -c "signed" /tmp/agama-prices.log)
   ok "$SIGNED feeds pushed from signed RedStone reports"
@@ -79,14 +89,16 @@ else
   bad "the agents failed"
 fi
 
-say "5. The app"
-for path in "/" "/portfolio" "/activity" "/api/markets" "/api/activity"; do
+say "6. The app"
+for path in "/stellar" "/stellar/amplify" "/stellar/portfolio" "/stellar/faucet" "/api/snapshot"; do
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3010$path")
   if [ "$code" = "200" ]; then ok "$path"; else bad "$path returned $code"; fi
 done
-N=$(curl -s http://localhost:3010/api/markets | python3 -I -c "
-import json,sys;d=json.load(sys.stdin);print(sum(1 for m in d['markets'] if m['price']))")
-if [ "$N" = "10" ]; then ok "all 10 markets priced through the app"; else bad "only $N priced"; fi
+N=$(curl -s http://localhost:3010/api/snapshot | python3 -I -c "
+import json,sys
+d=json.load(sys.stdin)
+print(sum(1 for m in d['markets'] if int(m['price']) > 0 and m['fresh']))")
+if [ "$N" = "10" ]; then ok "all 10 markets priced and fresh through the app"; else bad "only $N priced"; fi
 
 say "Result"
 printf '  %d passed, %d failed\n' "$PASS" "$FAIL"

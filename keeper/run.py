@@ -188,7 +188,14 @@ def run_agents(ch, dep):
         except ChainError as e:
             note(f"{pos[:8]} health unreadable, contract error {e.contract_error()}")
             continue
-        ltv, target, threshold = int(h["ltv"]), int(h["max_ltv"]), int(h["threshold"])
+        # The position's OWN target, not the market's ceiling. They coincide
+        # for an Earn opened at the maximum and they do not for an Amplify: a
+        # 3x loop carries 66.66% against a 70% market, so comparing against
+        # the ceiling makes the keeper see 3.34% of drift that is not there
+        # and send a rebalance every pass that correctly does nothing. The
+        # contract was always right; only the decision to call it was wrong.
+        target = int(ch.call(pos, "target") or h["max_ltv"])
+        ltv, threshold = int(h["ltv"]), int(h["threshold"])
         loose = int(ch.call(usdc, "balance", id=pos) or 0)
         label = f"{pos[:8]} ltv {ltv/100:.2f}% target {target/100:.2f}%"
 

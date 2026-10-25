@@ -108,61 +108,82 @@ record of what was true when. Nothing is deployed yet.
 ./scripts/verify.sh          everything, in one pass
 ```
 
-Four layers, in the order they depend on each other.
+Five layers, in the order they depend on each other.
 
 ```
 1. The contracts
-  ✓ 5 crates, 63 tests
+  ✓ 5 crates, 67 tests
   ✓ 5 wasms build
 
 2. What is live
-  ✓ core answers version: agama-stellar-core/0.1.0
-  ✓ oracle answers decimals: 7
-  ✓ vault answers rate: 1025270568267
+  ✓ core, oracle, vault, pool and backstop each asked a real question
   ✓ pool status 0, borrowing open
   ✓ 10 markets registered
 
-3. A whole position, on chain
+3. An Earn, on chain
   ✓ deposit, rise, fall, yield, compound, close
-      collateral 10.0000            debt at 70% 2,605.65
-      not one share sold 10.0000    buffer paid it: 491,519 -> 491,232
-      bought 0.7778 TSLAx           collateral grew 10.0000 -> 10.7778
-      returned 10.7778 TSLAx
+      10.0000 TSLAx -> 2,579.45 borrowed, all of it into the vault
+      a fall repaid out of the buffer, not one share sold
+      yield compounded: 10.0000 -> 10.7778 TSLAx
+      closed: 10.7778 TSLAx back, debt zero
 
-4. The keeper
-  ✓ 9 feeds pushed from signed RedStone reports
-  ✓ agents ran over every open position, all at 70.00%
+4. An Amplify, on chain
+  ✓ a multiple asked for, reached, held through a move, and unwound
+      10.0000 NVDAx at 3x -> 30.0000 held, 5,316.46 borrowed, LTV 66.66%
+      price +8% -> the agent BOUGHT: 30.0000 -> 34.4479 NVDAx
+      closed: 11.4815 NVDAx kept on a deposit of 10
 
-5. The app
-  ✓ / /portfolio /activity /api/markets /api/activity
-  ✓ all 10 markets priced through the app
+5. The keeper
+  ✓ 11 feeds pushed from signed RedStone reports
+  ✓ agents ran over every open position
 
-  18 passed, 0 failed
+6. The app
+  ✓ /stellar /stellar/amplify /stellar/portfolio /stellar/faucet /api/snapshot
+  ✓ all 10 markets priced and fresh through the app
+
+  19 passed, 0 failed
 ```
 
 Individually:
 
 ```
-cargo test                   the contracts
-./scripts/deploy.sh all      ours, on testnet
-./scripts/blend.sh all       our own instance of Blend
-./scripts/e2e.sh             one position, start to finish, on chain
-python3 keeper/run.py once   relay prices, then let the agents act
-cd web && pnpm dev           the app, on localhost:3010
+cargo test                      the contracts
+./scripts/deploy.sh all         ours, on testnet
+./scripts/blend.sh all          our own instance of Blend
+./scripts/e2e.sh                an Earn, start to finish, on chain
+./scripts/amplify-e2e.sh        an Amplify, the same
+python3 keeper/run.py once      relay prices, then let the agents act
+cd web && pnpm dev              the app, on localhost:3010
 ```
 
-## Live on testnet
+## The two products
 
-| | |
-|---|---|
-| core | `CCCYGJTBIXYUYEPHHKHPRBW7WDGKDGCKNYZXLLRZ5BDL7ZMU7VHB6VHS` |
-| oracle | `CAT7PIXJBRPMANBDGJTYHJL3VERMBZN4LRJUEFCUUVI75SPL3RB2BOSN` |
-| vault | `CDYMFEFFPNJM4AT5CNUYJP3BYD2TX24MEU3QG4OWOL6QNK2XSLP2ZBUM` |
-| Blend pool | `CA3EXQA2DTONIIHWYF77S3WMSSIW55GWAK6CNEJKSTHHJT55F4U6CE5W` |
-| backstop | `CASS56APDOL6RPC46QBK72SMAVZ3CMV3U4RQL74LXO5K3KHXXHQG23K6` |
+**Earn.** Deposit a stock, keep the stock. Seventy percent of its value is
+borrowed against it on Blend and put to work in the vault, and agents hold
+that level as the price moves. A rise borrows more into the vault. A fall is
+repaid out of the protocol's own buffer, in the same transaction that notices
+it, so no stock is ever sold: that collateral is what the user came here to
+keep. The vault yield above the debt is bought back as more of the stock, so
+the share count grows.
 
-Every address, including the ones abandoned on the way and why, is in
-`deployments/testnet.json`.
+**Amplify.** Deposit a stock, hold a multiple of it. The protocol borrows
+against the deposit, buys more of the same stock, pledges that too. A multiple
+of L carries an LTV of (L - 1) / L, so the market's own ceiling caps it at
+1 / (1 - ltv): 3.33x at a 70% market. Agents hold the multiple, buying when it
+rises and selling just enough to repay when it falls, with the sale sized to
+the debt rather than to the position, so what goes back is the stock the loan
+bought and never the deposit.
+
+The loop is settled rather than walked. Run pass by pass it converges from
+below and never arrives, and sixteen calls into the pool exceeds Soroban's CPU
+budget. The core advances the whole multiple of stock, pledges it, and borrows
+against the full position, keeping the dollars as payment. Identical to the
+loop's limit, exactly rather than approximately, in two calls.
+
+Pledge before borrowing, repay before withdrawing. Blend checks health at the
+moment of each request rather than at the end of the transaction, so the other
+order is a loan standing briefly against collateral that has not arrived yet.
+
 
 ## What testnet made us build that mainnet would not
 
