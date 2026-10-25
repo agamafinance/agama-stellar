@@ -51,7 +51,12 @@ export type Snapshot = {
   earn: (PositionView | undefined)[];
   amplify: (PositionView | undefined)[];
   usdc: string;
+  /// Native XLM, which pays the fees and is the one thing here nobody can
+  /// mint for the visitor.
   xlm: string;
+  /// Seconds before each market's faucet gives again, in market order, with
+  /// the dollar last. Zero means ready.
+  faucetIn: number[];
   /// Blend's borrow rate on USDC, in bps, computed from the reserve the way
   /// the pool computes it.
   borrowRateBps: number;
@@ -121,11 +126,13 @@ export async function readSnapshot(owner?: string): Promise<Snapshot> {
     positionsFor(owner, markets, 'amplify'),
   ]);
 
-  const [usdc, reserve, vaultRate, buffer] = await Promise.all([
+  const [usdc, reserve, vaultRate, buffer, faucetIn, xlm] = await Promise.all([
     owner ? read<bigint>(USDC, 'balance', [addr(owner)]) : Promise.resolve(0n),
     read<ReserveData>(POOL, 'get_reserve', [addr(USDC)]),
     read<bigint>(VAULT, 'rate'),
     read<bigint>(CORE, 'buffer'),
+    owner ? read<bigint[]>(CORE, 'faucet_in', [addr(owner)]) : Promise.resolve(null),
+    owner ? nativeBalance(owner) : Promise.resolve(0),
   ]);
 
   const rates = blendRate(reserve);
@@ -136,7 +143,8 @@ export async function readSnapshot(owner?: string): Promise<Snapshot> {
     earn,
     amplify,
     usdc: (usdc ?? 0n).toString(),
-    xlm: '0',
+    xlm: String(xlm ?? 0),
+    faucetIn: (faucetIn ?? []).map((s) => Number(s)),
     borrowRateBps: rates.borrowBps,
     utilizationBps: rates.utilBps,
     vaultRate: (vaultRate ?? 10n ** 12n).toString(),
@@ -188,6 +196,22 @@ async function positionsFor(
       };
     }),
   );
+}
+
+/// XLM is a classic balance, not a contract one, so it comes from Horizon
+/// rather than from a simulation.
+async function nativeBalance(owner: string): Promise<number> {
+  try {
+    const r = await fetch(`https://horizon-testnet.stellar.org/accounts/${owner}`, {
+      cache: 'no-store',
+    });
+    if (!r.ok) return 0;
+    const j = await r.json();
+    const native = j.balances?.find((b: { asset_type: string }) => b.asset_type === 'native');
+    return native ? Number(native.balance) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 type ReserveData = {

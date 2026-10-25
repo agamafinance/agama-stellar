@@ -94,7 +94,11 @@ export async function send(
 
 /// The calls the screens make.
 export const ix = {
-  faucet: (user: string, s: Stock) => ({ id: s.token, fn: 'faucet', args: [addr(user)] }),
+  /// Every market and the dollar, in one call and one signature. The per
+  /// token faucets are still there and still permissionless; this is the one
+  /// the screen uses, because eleven approvals is where people stop.
+  faucet: (user: string) => ({ id: CORE, fn: 'faucet', args: [addr(user)] }),
+  faucetOne: (user: string, s: Stock) => ({ id: s.token, fn: 'faucet', args: [addr(user)] }),
   earnDeposit: (user: string, s: Stock, amount: bigint, ltvBps: number) => ({
     id: CORE,
     fn: 'earn_deposit',
