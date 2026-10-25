@@ -190,13 +190,58 @@ print('\n'.join(f'{k}|{v}' for k,v in d.items()))
   done
 }
 
+# ------------------------------------------------------------------ core ----
+
+# The protocol, and the ten markets it knows about.
+#
+# The USDC it borrows is the one the Agama vault accepts, not Blend's testnet
+# USDC. They are different tokens and the mismatch would only have shown up at
+# the first deposit, as a vault refusing a token it has never heard of.
+core() {
+  say "The core, and its markets"
+  local admin; admin=$(stellar keys address "$SRC")
+  local id; id=$(get contracts.core)
+  if [ -z "$id" ]; then
+    id=$(stellar contract deploy --quiet \
+      --wasm-hash "$(get wasm.core)" --source "$SRC" --network "$NET" \
+      -- --admin "$admin" --usdc "$(get contracts.usdc)" \
+         --usdc_reserve_index "$(get contracts.usdcIndex)" \
+         --pool "$(get contracts.pool)" --oracle "$(get contracts.oracle)" \
+         --vault "$VAULT" --position_wasm "$(get wasm.position)" --max_price_age 86400)
+    put contracts.core "$id"
+    note "core $id"
+  else
+    note "core already there, $id"
+  fi
+
+  python3 -I -c "
+import json
+m={x['symbol']: x for x in json.load(open('deployments/markets.json'))['markets']}
+d=json.load(open('$OUT'))
+for sym, addr in d['stocks'].items():
+    x=m[sym]; ix=d['reserves'][sym]
+    print(f\"{sym}|{addr}|{ix}|{x['ltv']}|{x['threshold']}|{x['offHoursBuffer']}\")
+" | while IFS='|' read -r sym addr ix ltv thr buf; do
+    if [ -n "$(get "markets.$sym")" ]; then note "$sym already a market"; continue; fi
+    stellar contract invoke --quiet --id "$id" --source "$SRC" --network "$NET" \
+      -- add_market --token "$addr" --reserve_index "$ix" \
+         --ltv "$ltv" --threshold "$thr" --off_hours_buffer "$buf" >/dev/null
+    # The core mints the stand-in on an Amplify or a compound, so it owns them.
+    stellar contract invoke --quiet --id "$addr" --source "$SRC" --network "$NET" \
+      -- set_admin --new_admin "$id" >/dev/null
+    put "markets.$sym" "$ix"
+    note "$sym market, reserve $ix, stock admin handed over"
+  done
+}
+
 case "${1:-all}" in
   upload) upload ;;
   stocks) stocks ;;
   oracle) oracle ;;
   pool) pool ;;
   reserves) reserves ;;
-  all) upload; stocks; oracle; pool; reserves ;;
+  core) core ;;
+  all) upload; stocks; oracle; pool; reserves; core ;;
   *) echo "unknown stage: $1" >&2; exit 2 ;;
 esac
 

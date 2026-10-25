@@ -19,10 +19,26 @@
   },
   "contracts": {
     "oracle": "CAT7PIXJBRPMANBDGJTYHJL3VERMBZN4LRJUEFCUUVI75SPL3RB2BOSN",
-    "pool": "CCTRZCUKU7XF4K764ODLSTWDBBXOA3KHCICA2FJRBC2KAM6JLF7AWG4A"
+    "pool": "CCTRZCUKU7XF4K764ODLSTWDBBXOA3KHCICA2FJRBC2KAM6JLF7AWG4A",
+    "usdc": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "usdcIndex": "11",
+    "core": "CDUE6CG3LCSFIYXKWDT5CEAEL6AGVLUYYGTBZ23VJ5BIT7O2OAX3GHPC"
   },
   "reserves": {
     "USDC": "0",
+    "TSLAx": "1",
+    "NVDAx": "2",
+    "AAPLx": "3",
+    "MSFTx": "4",
+    "AMZNx": "5",
+    "GOOGLx": "6",
+    "METAx": "7",
+    "SPYx": "8",
+    "BENJI": "9",
+    "GOLDx": "10",
+    "agUSDC": "11"
+  },
+  "markets": {
     "TSLAx": "1",
     "NVDAx": "2",
     "AAPLx": "3",
