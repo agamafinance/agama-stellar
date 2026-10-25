@@ -118,11 +118,85 @@ print(json.dumps(json.load(open('deployments/redstone-signers.json'))['primaryPr
   note "oracle $id"
 }
 
+# ------------------------------------------------------------------ pool ----
+
+# Our own Blend pool, created through the factory that is already live. The
+# reserves are ours; the protocol around them is theirs.
+pool() {
+  say "Our Blend pool"
+  local existing; existing=$(get contracts.pool)
+  if [ -n "$existing" ]; then note "already there, $existing"; return; fi
+  local admin; admin=$(stellar keys address "$SRC")
+  local salt; salt=$(python3 -I -c "
+import hashlib
+print(hashlib.sha256(b'agama-stellar/pool/v1').hexdigest())
+")
+  id=$(stellar contract invoke --quiet --id "$BLEND_FACTORY" --source "$SRC" --network "$NET" \
+    -- deploy --admin "$admin" --name '"Agama Stocks"' --salt "$salt" \
+       --oracle "$(get contracts.oracle)" \
+       --backstop_take_rate 0 --max_positions 4 --min_collateral 0 | tr -d '"')
+  put contracts.pool "$id"
+  note "pool $id"
+}
+
+# -------------------------------------------------------------- reserves ----
+
+# Blend's factors are seven decimal fixed point: 7_500_000 is 75%.
+#
+# The stock reserves carry a c_factor of 75% where the core targets 70%. The
+# gap is deliberate: Blend's own ceiling has to sit ABOVE the one the agents
+# hold, or a position at its target is a position Blend already considers
+# maxed out, and the next rebalance up has nowhere to go.
+#
+# USDC is borrowable and not collateral; the stocks are collateral and nobody
+# borrows them, which is the whole shape of this market in two lines.
+reserve_json() {
+  python3 -I -c "
+import json
+c_factor, l_factor = $1, $2
+print(json.dumps({
+  'c_factor': c_factor, 'decimals': 7, 'enabled': True, 'index': 0,
+  'l_factor': l_factor, 'max_util': 9_500_000,
+  'r_base': 100_000, 'r_one': 500_000, 'r_two': 5_000_000, 'r_three': 15_000_000,
+  # A string, not a number: the CLI parses a bare integer here as the wrong
+  # XDR type and says only 'invalid type: number, expected string or map'.
+  'reactivity': 1_000, 'supply_cap': '1000000000000000000',
+  'util': 7_500_000,
+}))
+"
+}
+
+set_one_reserve() {
+  local asset=$1 cfg=$2 label=$3
+  if [ -n "$(get "reserves.$label")" ]; then note "$label already a reserve"; return; fi
+  stellar contract invoke --quiet --id "$(get contracts.pool)" --source "$SRC" --network "$NET" \
+    -- queue_set_reserve --asset "$asset" --metadata "$cfg" >/dev/null
+  local ix
+  ix=$(stellar contract invoke --quiet --id "$(get contracts.pool)" --source "$SRC" --network "$NET" \
+    -- set_reserve --asset "$asset" | tr -d '"')
+  put "reserves.$label" "$ix"
+  note "$label index $ix"
+}
+
+reserves() {
+  say "Reserves: USDC to borrow, the ten stocks as collateral"
+  set_one_reserve "$BLEND_USDC" "$(reserve_json 0 10000000)" USDC
+  python3 -I -c "
+import json
+d=json.load(open('$OUT'))['stocks']
+print('\n'.join(f'{k}|{v}' for k,v in d.items()))
+" | while IFS='|' read -r sym id; do
+    set_one_reserve "$id" "$(reserve_json 7500000 10000000)" "$sym"
+  done
+}
+
 case "${1:-all}" in
   upload) upload ;;
   stocks) stocks ;;
   oracle) oracle ;;
-  all) upload; stocks; oracle ;;
+  pool) pool ;;
+  reserves) reserves ;;
+  all) upload; stocks; oracle; pool; reserves ;;
   *) echo "unknown stage: $1" >&2; exit 2 ;;
 esac
 
