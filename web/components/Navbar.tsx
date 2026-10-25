@@ -8,10 +8,10 @@ import { useNetwork, type Platform } from '@/lib/network/NetworkContext';
 
 const NAV: Record<Platform, { href: string; label: string }[]> = {
   stellar: [
-    { href: '/stellar/portfolio', label: 'Portfolio' },
-    { href: '/stellar', label: 'Earn' },
-    { href: '/stellar/amplify', label: 'Amplify' },
-    { href: '/stellar/faucet', label: 'Faucet' },
+    { href: '/stellar-rwa/portfolio', label: 'Portfolio' },
+    { href: '/stellar-rwa', label: 'Earn' },
+    { href: '/stellar-rwa/amplify', label: 'Amplify' },
+    { href: '/stellar-rwa/faucet', label: 'Faucet' },
   ],
 };
 
@@ -20,7 +20,7 @@ const NAV: Record<Platform, { href: string; label: string }[]> = {
 const STELLAR_MARK = `${process.env.NEXT_PUBLIC_ASSET_PREFIX ?? ''}/stellar.svg`;
 
 const NETWORKS: { id: Platform; label: string; logo: string; home: string }[] = [
-  { id: 'stellar', label: 'Stellar', logo: STELLAR_MARK, home: '/stellar' },
+  { id: 'stellar', label: 'Stellar', logo: STELLAR_MARK, home: '/stellar-rwa' },
 ];
 
 export function Navbar() {

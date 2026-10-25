@@ -92,7 +92,7 @@ export default function StellarPortfolioPage() {
                     name={`${m.stock.name} · ${what} · ${BigInt(x.debt) > 0n ? `${usd(x.debt)} borrowed` : 'nothing borrowed'}${agents}`}
                     amount={qty(x.collateral, 2)}
                     sub={hf ? `${usd(x.value)} · health ${hf}` : usd(x.value)}
-                    href={`${x.kind === 'earn' ? '/stellar' : '/stellar/amplify'}?s=${x.symbol}`}
+                    href={`${x.kind === 'earn' ? '/stellar-rwa' : '/stellar-rwa/amplify'}?s=${x.symbol}`}
                   />
                 );
               })}
@@ -106,7 +106,7 @@ export default function StellarPortfolioPage() {
                   amount={qty(h.amount, 2)}
                   amountTestId={`held-${h.m.stock.symbol}`}
                   sub={usd(h.value)}
-                  href={`/stellar?s=${h.m.stock.symbol}`}
+                  href={`/stellar-rwa?s=${h.m.stock.symbol}`}
                 />
               ))}
 
@@ -117,14 +117,14 @@ export default function StellarPortfolioPage() {
                 amount={usd(usdcHeld).replace('$', '')}
                 amountTestId="held-USDC"
                 sub={usd(usdcHeld)}
-                href="/stellar/faucet"
+                href="/stellar-rwa/faucet"
               />
 
               {ready && positions.length === 0 && holdings.length === 0 && (
                 <p className="rounded-2xl bg-[#fdfaf1] px-5 py-4 text-[14px] text-fg-muted shadow-[0_1px_3px_rgba(20,50,35,0.06)]">
                   No position yet. Get test tokens on the{' '}
-                  <Link href="/stellar/faucet" className="underline underline-offset-2">Faucet</Link>, then deposit a
-                  stock on <Link href="/stellar" className="underline underline-offset-2">Earn</Link> and the agents
+                  <Link href="/stellar-rwa/faucet" className="underline underline-offset-2">Faucet</Link>, then deposit a
+                  stock on <Link href="/stellar-rwa" className="underline underline-offset-2">Earn</Link> and the agents
                   take it from there.
                 </p>
               )}

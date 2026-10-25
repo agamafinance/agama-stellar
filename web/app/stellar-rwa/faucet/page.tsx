@@ -63,7 +63,7 @@ export default function StellarFaucetPage() {
           <div aria-hidden className="pointer-events-none absolute right-4 top-2 z-20 hidden lg:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={asset('/stellar.svg')}
+              src={asset('/stellar-rwa.svg')}
               alt=""
               className="h-[170px] w-[170px] drop-shadow-[0_18px_30px_rgba(20,50,35,0.25)]"
             />
@@ -106,7 +106,7 @@ export default function StellarFaucetPage() {
           <StepRow
             icon={
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={asset('/stellar.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
+              <img src={asset('/stellar-rwa.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
             }
             title="XLM for fees"
             blurb="Stellar testnet transactions are paid in XLM, and opening a position deploys a contract, so it wants rather more than a transfer would. Friendbot hands out 10,000 at a time; it is the one thing here nobody can mint for you."
@@ -158,7 +158,7 @@ export default function StellarFaucetPage() {
           </p>
           {!busy && <Status text={status?.text} hash={status?.hash} />}
 
-          <Link href="/stellar" className="group mt-6 flex items-center gap-4 rounded-2xl bg-[#254839] px-5 py-4">
+          <Link href="/stellar-rwa" className="group mt-6 flex items-center gap-4 rounded-2xl bg-[#254839] px-5 py-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={asset('/agama-logo-circle.svg')} alt="" className="h-10 w-10" />
             <div>
