@@ -233,13 +233,12 @@ function blendRate(r: ReserveData | null): { borrowBps: number; utilBps: number 
     const over = (util - cap) / (1 - cap);
     rate = over * (r_three / S7) + r_two / S7 + r_one / S7 + r_base / S7;
   }
-  // ir_mod is the pool's own correction, applied as a multiplier at 12dp.
-  const modded = rate * Number(r.data.ir_mod) / 1e12;
+  // ir_mod is the pool's own correction, a multiplier at SEVEN decimals, not
+  // twelve like the b_rate and d_rate two lines above it. Mixing the two
+  // scales reports every rate as zero, which looks like a pool nobody has
+  // borrowed from rather than a unit error.
+  const modded = (rate * Number(r.data.ir_mod)) / 1e7;
   return { borrowBps: Math.round(modded * 10_000), utilBps: Math.round(util * 10_000) };
 }
 
 const bps = (sevenDp: number) => Math.round((sevenDp / 10_000_000) * 10_000);
-
-// Imported late so the module reads top-down: the oracle is only used for
-// prices, and naming it beside the price read says so.
-import { ORACLE as ORACLE } from './config';
