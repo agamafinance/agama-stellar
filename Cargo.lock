@@ -1096,6 +1096,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "position"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
