@@ -13,6 +13,7 @@
 #   ./scripts/deploy.sh vault      the testnet stand-in for the Agama vault
 #   ./scripts/deploy.sh core       the protocol, and its markets
 #   ./scripts/deploy.sh seed       liquidity, the buffer, and a first price
+#   ./scripts/deploy.sh prices     refresh the admin-set prices
 #   ./scripts/deploy.sh all        in that order
 set -euo pipefail
 
@@ -39,6 +40,17 @@ BLEND_BLND=CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF
 
 mkdir -p deployments
 [ -f "$OUT" ] || echo '{}' > "$OUT"
+
+# The ledger an allowance may not be set beyond, read from the network each
+# run. A hardcoded horizon stops being valid the week after it is written.
+current_ledger() {
+  curl -s "https://horizon-testnet.stellar.org/ledgers?order=desc&limit=1" \
+    | python3 -I -c "import json,sys;print(json.load(sys.stdin)['_embedded']['records'][0]['sequence'])"
+}
+
+ME=$(stellar keys address "$SRC")
+
+inv() { stellar contract invoke --quiet --id "$1" --source "$SRC" --network "$NET" -- "${@:2}"; }
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
@@ -165,7 +177,7 @@ import json
 m={x['symbol']: x for x in json.load(open('deployments/markets.json'))['markets']}
 d=json.load(open('$OUT'))
 for sym, addr in d['stocks'].items():
-    x=m[sym]; ix=d['reserves'][sym]
+    x=m[sym]; ix=d['blend']['reserves'][sym]
     print(f\"{sym}|{addr}|{ix}|{x['ltv']}|{x['threshold']}|{x['offHoursBuffer']}\")
 " | while IFS='|' read -r sym addr ix ltv thr buf; do
     if [ -n "$(get "markets.$sym")" ]; then note "$sym already a market"; continue; fi
@@ -180,13 +192,106 @@ for sym, addr in d['stocks'].items():
   done
 }
 
+# ------------------------------------------------------------------ seed ----
+
+# Dollars in three places, because they are three different things:
+#
+#   - supplied to the pool, so there is something for a position to borrow,
+#   - in the core's buffer, so a fall can be answered in the same call that
+#     notices it rather than after a withdrawal queue has cleared,
+#   - held by the deployer, so the faucet and the vault's accrue have cash.
+#
+# A price for every market too. Without one the oracle has nothing to say and
+# the core refuses to open a position, which is the correct refusal and a
+# confusing first impression.
+seed() {
+  say "Seeding"
+  local pool usdc core_id
+  pool=$(get blend.pool); usdc=$(get blend.usdc); core_id=$(get contracts.core)
+
+  local horizon; horizon=$(( $(current_ledger) + 500000 ))
+  inv "$usdc" mint --to "$ME" --amount 20000000000000 >/dev/null
+  note "minted 2,000,000 USDC"
+
+  if [ "$(get seed.supplied)" != "yes" ]; then
+    inv "$usdc" approve --from "$ME" --spender "$pool" --amount 10000000000000 \
+        --expiration_ledger "$horizon" >/dev/null
+    stellar contract invoke --quiet --id "$pool" --source "$SRC" --network "$NET" \
+      -- submit --from "$ME" --spender "$ME" --to "$ME" \
+         --requests "[{\"address\":\"$usdc\",\"amount\":\"10000000000000\",\"request_type\":0}]" \
+         >/dev/null
+    put seed.supplied yes
+    note "supplied 1,000,000 USDC to the pool"
+  else
+    note "pool liquidity already supplied"
+  fi
+
+  if [ "$(get seed.buffer)" != "yes" ]; then
+    inv "$usdc" approve --from "$ME" --spender "$core_id" --amount 5000000000000 \
+        --expiration_ledger "$horizon" >/dev/null
+    inv "$core_id" fund_buffer --from "$ME" --amount 5000000000000 >/dev/null
+    put seed.buffer yes
+    note "buffer funded with 500,000 USDC"
+  else
+    note "buffer already funded"
+  fi
+
+  feeds
+  prices
+}
+
+# Every market's RedStone feed id, then a first price.
+#
+# The feed id is a 32-byte right-padded ASCII string, which is how RedStone
+# names a feed inside a payload: "TSLA" is 0x5453_4c41 followed by 28 zero
+# bytes. Without the mapping the oracle has no idea which number in a report
+# belongs to which token, and says UnknownAsset, which is the right refusal
+# and a confusing first impression.
+feeds() {
+  say "Feeds"
+  python3 -I -c "
+import json
+m = {x['symbol']: x['feed'] for x in json.load(open('deployments/markets.json'))['markets']}
+d = json.load(open('$OUT'))
+for sym, addr in d['stocks'].items():
+    print(f\"{sym}|{addr}|{m[sym].encode().hex().ljust(64, '0')}\")
+" | while IFS='|' read -r sym addr feed; do
+    inv "$(get contracts.oracle)" add_feed \
+      --asset "{\"Stellar\":\"$addr\"}" --feed "$feed" >/dev/null 2>&1 \
+      || note "$sym feed already registered"
+    note "$sym feed $feed"
+  done
+}
+
+# A first price for every market, signed by nobody: the admin path, bounded by
+# the same max_move_bps as a relayed report. The keeper replaces these with
+# RedStone reports; until one arrives there has to be something, or the first
+# visitor meets a refusal rather than a product.
+prices() {
+  say "Prices"
+  python3 -I -c "
+import json
+d = json.load(open('$OUT'))
+seed = json.load(open('deployments/seed-prices.json'))
+for sym, addr in d['stocks'].items():
+    print(f\"{sym}|{addr}|{int(round(seed[sym] * 10_000_000))}\")
+" | while IFS='|' read -r sym addr px; do
+    inv "$(get contracts.oracle)" set_price \
+      --asset "{\"Stellar\":\"$addr\"}" --price "$px" >/dev/null
+    note "$sym $px"
+  done
+}
+
 case "${1:-all}" in
   upload) upload ;;
   stocks) stocks ;;
   oracle) oracle ;;
   vault) vault ;;
   core) core ;;
-  all) upload; stocks; oracle; vault; core ;;
+  seed) seed ;;
+  feeds) feeds ;;
+  prices) prices ;;
+  all) upload; stocks; oracle; vault; core; seed ;;
   *) echo "unknown stage: $1" >&2; exit 2 ;;
 esac
 
