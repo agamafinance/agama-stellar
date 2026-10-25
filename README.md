@@ -101,3 +101,88 @@ liquidation threshold; the off-hours buffer is what differs.
 
 Contracts land one at a time, each with its tests, and the git history is the
 record of what was true when. Nothing is deployed yet.
+
+## Running it
+
+```
+./scripts/verify.sh          everything, in one pass
+```
+
+Four layers, in the order they depend on each other.
+
+```
+1. The contracts
+  ✓ 5 crates, 63 tests
+  ✓ 5 wasms build
+
+2. What is live
+  ✓ core answers version: agama-stellar-core/0.1.0
+  ✓ oracle answers decimals: 7
+  ✓ vault answers rate: 1025270568267
+  ✓ pool status 0, borrowing open
+  ✓ 10 markets registered
+
+3. A whole position, on chain
+  ✓ deposit, rise, fall, yield, compound, close
+      collateral 10.0000            debt at 70% 2,605.65
+      not one share sold 10.0000    buffer paid it: 491,519 -> 491,232
+      bought 0.7778 TSLAx           collateral grew 10.0000 -> 10.7778
+      returned 10.7778 TSLAx
+
+4. The keeper
+  ✓ 9 feeds pushed from signed RedStone reports
+  ✓ agents ran over every open position, all at 70.00%
+
+5. The app
+  ✓ / /portfolio /activity /api/markets /api/activity
+  ✓ all 10 markets priced through the app
+
+  18 passed, 0 failed
+```
+
+Individually:
+
+```
+cargo test                   the contracts
+./scripts/deploy.sh all      ours, on testnet
+./scripts/blend.sh all       our own instance of Blend
+./scripts/e2e.sh             one position, start to finish, on chain
+python3 keeper/run.py once   relay prices, then let the agents act
+cd web && pnpm dev           the app, on localhost:3010
+```
+
+## Live on testnet
+
+| | |
+|---|---|
+| core | `CCCYGJTBIXYUYEPHHKHPRBW7WDGKDGCKNYZXLLRZ5BDL7ZMU7VHB6VHS` |
+| oracle | `CAT7PIXJBRPMANBDGJTYHJL3VERMBZN4LRJUEFCUUVI75SPL3RB2BOSN` |
+| vault | `CDYMFEFFPNJM4AT5CNUYJP3BYD2TX24MEU3QG4OWOL6QNK2XSLP2ZBUM` |
+| Blend pool | `CA3EXQA2DTONIIHWYF77S3WMSSIW55GWAK6CNEJKSTHHJT55F4U6CE5W` |
+| backstop | `CASS56APDOL6RPC46QBK72SMAVZ3CMV3U4RQL74LXO5K3KHXXHQG23K6` |
+
+Every address, including the ones abandoned on the way and why, is in
+`deployments/testnet.json`.
+
+## What testnet made us build that mainnet would not
+
+Three things here exist because of a wall, not a preference, and each one says
+so in its own file.
+
+**Our own instance of Blend.** A pool lets nobody borrow until its backstop is
+funded, a backstop is funded in BLND:USDC comet LP, and on testnet neither
+BLND nor Blend's USDC can be minted by anyone but their admins. Their shared
+instance is permanently supply-only for us. So Blend's own contracts are
+deployed by us, unmodified, with tokens we can mint. Same wasm, same request
+codes, same interest model.
+
+**A stand-in vault.** The live vault takes Circle's USDC and nobody but Circle
+mints that, so without dollars nothing can be supplied, borrowed or buffered.
+`contracts/vault` is not a simplified vault, it is the two properties the
+protocol is built around: a deposit lands immediately, and a withdrawal does
+NOT pay out, it queues.
+
+**Two admin-priced markets.** RedStone carries SPY only as `SPY---PRE_AFTER`
+and BENJI as `BENJI_ETHEREUM_FUNDAMENTAL`, and the deployed oracle was bound
+to `SPY` and `BENJI` before that was known. `retarget_feed` exists in the
+source now; the live instance predates it.
