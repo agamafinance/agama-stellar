@@ -1,0 +1,8 @@
+{
+  "wasm": {
+    "stock": "8ae9a825a407bb8b1850431cdbf534c56f0c1672e6d4a8994cdc638fcefafab3",
+    "oracle": "9c41b2e0a8cef29607a61bc9603de583f2b1f3ec50e332c68b4152415c5c1d0a",
+    "position": "95f27c5c20a6a18ded2474a064a45ea57883e2836cd5c8e2614ae0f819f6e469",
+    "core": "a0914bb78dbcfafbdef8804f61d9990c8666558e9103b3b608d61999be79a38d"
+  }
+}
