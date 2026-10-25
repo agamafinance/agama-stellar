@@ -45,6 +45,13 @@ for k in ks[:-1]: node = node.setdefault(k, {})
 node[ks[-1]] = '''$2'''
 json.dump(d, open(p,'w'), indent=2); open(p,'a').write('\n')
 "; }
+# The ledger an allowance may not be set beyond, read from the network each
+# run. A hardcoded horizon stops being valid the week after it is written.
+current_ledger() {
+  curl -s "https://horizon-testnet.stellar.org/ledgers?order=desc&limit=1" \
+    | python3 -I -c "import json,sys;print(json.load(sys.stdin)['_embedded']['records'][0]['sequence'])"
+}
+
 salt_of() { python3 -I -c "import hashlib;print(hashlib.sha256(b'agama-stellar/$1').hexdigest())"; }
 
 up() { # up <name> <path>
@@ -99,9 +106,9 @@ comet() {
   inv "$blnd" mint --to "$ME" --amount 10000000000000 >/dev/null
   inv "$usdc" mint --to "$ME" --amount 2500000000000 >/dev/null
   inv "$blnd" approve --from "$ME" --spender "$factory" --amount 10000000000000 \
-      --expiration_ledger 4000000 >/dev/null
+      --expiration_ledger "$(( $(current_ledger) + 500000 ))" >/dev/null
   inv "$usdc" approve --from "$ME" --spender "$factory" --amount 2500000000000 \
-      --expiration_ledger 4000000 >/dev/null
+      --expiration_ledger "$(( $(current_ledger) + 500000 ))" >/dev/null
 
   local id
   id=$(stellar contract invoke --quiet --id "$factory" --source "$SRC" --network "$NET" \
@@ -170,10 +177,103 @@ print(json.dumps({'backstop': '$backstop', 'blnd_id': '$blnd', 'pool_hash': '$po
   note "emitter owns BLND"
 }
 
+
+# ------------------------------------------------------------------ pool ----
+
+# Our lending pool, from our factory, so our backstop counts for it.
+pool2() {
+  say "Our lending pool"
+  if [ -n "$(get blend.pool)" ]; then note "already there, $(get blend.pool)"; return; fi
+  local id
+  id=$(stellar contract invoke --quiet --id "$(get blend.poolFactory)" --source "$SRC" \
+    --network "$NET" -- deploy --admin "$ME" --name '"Agama Stocks"' \
+      --salt "$(salt_of lending-pool/v1)" --oracle "$(get contracts.oracle)" \
+      --backstop_take_rate 0 --max_positions 4 --min_collateral 0 | tr -d '"')
+  put blend.pool "$id"
+  note "pool $id"
+}
+
+# -------------------------------------------------------------- reserves ----
+
+# Blend's factors are seven decimal fixed point: 7_500_000 is 75%.
+#
+# The stock reserves carry a c_factor of 75% where the core targets 70%. The
+# gap is deliberate: Blend's own ceiling has to sit ABOVE the one the agents
+# hold, or a position at its target is a position Blend already considers maxed
+# out, and the next rebalance up has nowhere to go.
+reserve_json() {
+  python3 -I -c "
+import json
+print(json.dumps({
+  'c_factor': $1, 'decimals': 7, 'enabled': True, 'index': 0,
+  'l_factor': $2, 'max_util': 9_500_000,
+  'r_base': 100_000, 'r_one': 500_000, 'r_two': 5_000_000, 'r_three': 15_000_000,
+  # A string, not a number: as a bare integer the CLI parses this as the wrong
+  # XDR type and rejects the whole struct without naming the field.
+  'reactivity': 1_000, 'supply_cap': '1000000000000000000',
+  'util': 7_500_000,
+}))
+"
+}
+
+reserves2() {
+  say "Reserves"
+  local pool; pool=$(get blend.pool)
+  local specs; specs="USDC|$(get blend.usdc)|0|10000000"
+  specs="$specs
+$(python3 -I -c "
+import json
+d=json.load(open('$OUT'))['stocks']
+print('\n'.join(f'{k}|{v}|7500000|10000000' for k,v in d.items()))
+")"
+  echo "$specs" | while IFS='|' read -r label asset cf lf; do
+    if [ -n "$(get "blend.reserves.$label")" ]; then note "$label already a reserve"; continue; fi
+    stellar contract invoke --quiet --id "$pool" --source "$SRC" --network "$NET" \
+      -- queue_set_reserve --asset "$asset" --metadata "$(reserve_json "$cf" "$lf")" >/dev/null
+    local ix
+    ix=$(stellar contract invoke --quiet --id "$pool" --source "$SRC" --network "$NET" \
+      -- set_reserve --asset "$asset" | tr -d '"')
+    put "blend.reserves.$label" "$ix"
+    note "$label index $ix"
+  done
+}
+
+# ------------------------------------------------------------------ fund ----
+
+# LP into the backstop, then the pool can be switched on.
+#
+# Blend's threshold reads the BLND and USDC sitting BEHIND the LP, not the
+# share count, so what matters is that the comet is deep rather than that we
+# hold many shares of it.
+fund() {
+  say "Funding the backstop"
+  local bs comet_id pool
+  bs=$(get blend.backstop); comet_id=$(get blend.comet); pool=$(get blend.pool)
+  local lp
+  lp=$(stellar contract invoke --quiet --id "$comet_id" --source "$SRC" --network "$NET" \
+    -- balance --id "$ME" | tr -d '"')
+  note "we hold $lp LP"
+  if [ "$(get blend.backstopFunded)" != "yes" ]; then
+    local horizon; horizon=$(( $(current_ledger) + 500000 ))
+    inv "$comet_id" approve --from "$ME" --spender "$bs" --amount "$lp" \
+        --expiration_ledger "$horizon" >/dev/null
+    inv "$bs" deposit --from "$ME" --pool_address "$pool" --amount "$lp" >/dev/null
+    put blend.backstopFunded yes
+    note "deposited"
+  fi
+  stellar contract invoke --quiet --id "$bs" --source "$SRC" --network "$NET" \
+    -- pool_data --pool "$pool" | tail -1
+  inv "$pool" set_status --pool_status 0 >/dev/null
+  note "pool status $(inv "$pool" get_config | python3 -I -c "import json,sys;print(json.load(sys.stdin)['status'])")"
+}
+
 case "${1:-all}" in
   tokens) tokens ;;
   comet) comet ;;
   stack) stack ;;
-  all) tokens; comet; stack ;;
+  pool) pool2 ;;
+  reserves) reserves2 ;;
+  fund) fund ;;
+  all) tokens; comet; stack; pool2; reserves2; fund ;;
   *) echo "unknown stage: $1" >&2; exit 2 ;;
 esac
