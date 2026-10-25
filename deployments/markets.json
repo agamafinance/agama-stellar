@@ -38,7 +38,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "TSLA"
     },
     {
       "symbol": "NVDAx",
@@ -48,7 +49,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "NVDA"
     },
     {
       "symbol": "AAPLx",
@@ -58,7 +60,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "AAPL"
     },
     {
       "symbol": "MSFTx",
@@ -68,7 +71,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "MSFT"
     },
     {
       "symbol": "AMZNx",
@@ -78,7 +82,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "AMZN"
     },
     {
       "symbol": "GOOGLx",
@@ -88,7 +93,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "GOOGL"
     },
     {
       "symbol": "METAx",
@@ -98,7 +104,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "META"
     },
     {
       "symbol": "SPYx",
@@ -108,7 +115,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "10.0000000"
+      "drip": "10.0000000",
+      "redstone": "SPY---PRE_AFTER"
     },
     {
       "symbol": "BENJI",
@@ -118,7 +126,8 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 200,
-      "drip": "1000.0000000"
+      "drip": "1000.0000000",
+      "redstone": "BENJI_ETHEREUM_FUNDAMENTAL"
     },
     {
       "symbol": "GOLDx",
@@ -128,7 +137,9 @@
       "ltv": 7000,
       "threshold": 8000,
       "offHoursBuffer": 500,
-      "drip": "1.0000000"
+      "drip": "1.0000000",
+      "redstone": "XAU"
     }
-  ]
+  ],
+  "redstoneNote": "The on-chain feed id must be the name inside the signed payload. RedStone carries SPY only as SPY---PRE_AFTER and BENJI as BENJI_ETHEREUM_FUNDAMENTAL; the live oracle was bound to SPY and BENJI before that was known and has no retarget path, so those two stay admin-priced. retarget_feed exists in the source for the next one."
 }
