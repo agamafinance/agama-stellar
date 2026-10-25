@@ -249,6 +249,18 @@ seed() {
 # and a confusing first impression.
 feeds() {
   say "Feeds"
+  # USDC needs one too, and that is not an afterthought. Blend asks its oracle
+  # for a price for EVERY asset in a position, the borrowed one included, and
+  # unwraps the answer. No feed for the dollar means lastprice returns None,
+  # the pool traps, and the failure arrives as Error(WasmVm, InvalidAction) at
+  # the borrow, which names neither the oracle nor the asset it was missing.
+  inv "$(get contracts.oracle)" add_feed \
+    --asset "{\"Stellar\":\"$(get blend.usdc)\"}" \
+    --feed "5553444300000000000000000000000000000000000000000000000000000000" >/dev/null 2>&1 \
+    || note "USDC feed already registered"
+  inv "$(get contracts.oracle)" set_price \
+    --asset "{\"Stellar\":\"$(get blend.usdc)\"}" --price 10000000 >/dev/null
+  note "USDC feed and a dollar"
   python3 -I -c "
 import json
 m = {x['symbol']: x['feed'] for x in json.load(open('deployments/markets.json'))['markets']}
