@@ -612,19 +612,84 @@ impl Core {
         let (max_ltv, _) = Self::terms(&m);
 
         let target = p.target().min(max_ltv);
-        let want = Self::debt_at(p.collateral(), price, target);
         let owed = p.debt();
-        let delta = want - owed;
+        let want = Self::debt_at(p.collateral(), price, target);
 
+        // The position's own Product, which the wasm import gives its own
+        // type: same shape, different name, so it is compared on its side.
+        let amplify = p.product() == position::Product::Amplify;
+
+        // How much the debt has to move, and the two products do not compute
+        // it the same way.
+        //
+        // An Earn borrows into the vault, so the collateral does not move and
+        // the answer is simply the gap to the target.
+        //
+        // An Amplify spends what it borrows on more of the same stock, which
+        // lifts the denominator too, so closing the gap by the gap leaves the
+        // position short every time. Solving D' / (V + D' - D) = t for D'
+        // gives D' - D = (tV - D) / (1 - t), which is the same number divided
+        // by what is left of the ratio. At a two-thirds target that is three
+        // times larger, and getting it wrong does not look like a bug: the
+        // LTV simply never quite arrives and the agent runs again next pass.
+        let delta = if amplify {
+            (want - owed) * BPS / (BPS - target as i128)
+        } else {
+            want - owed
+        };
+
+        // Where the dollars go, as well as how many of them, depends on what
+        // the position is FOR.
+        //
+        // An Earn is holding stock and lending its value out: a rise borrows
+        // more into the vault, a fall is repaid out of the buffer so that no
+        // stock has to be sold. An Amplify is holding a multiple of the stock:
+        // a rise buys more of it, and a fall sells just enough to repay. Send
+        // an Amplify's borrowings to the vault and the multiple quietly
+        // decays while the LTV reads correct, which is the worst shape a bug
+        // can take: every number on the screen agrees and the position is not
+        // the one the user asked for.
+        // The position's own Product, which the wasm import gives its own
+        // type: same shape, different name, so it is compared on its side.
         if delta > 0 {
-            Self::borrow_into_vault(&e, &p, delta);
+            if amplify {
+                p.borrow(&delta, &e.current_contract_address());
+                let bought = Self::buy_stock_from_core(&e, &m, &p.address, delta, price);
+                p.supply(&bought);
+            } else {
+                Self::borrow_into_vault(&e, &p, delta);
+            }
         } else if delta < 0 {
-            Self::repay_from_buffer(&e, &p, -delta)?;
+            if amplify {
+                Self::sell_to_repay(&e, &m, &p, -delta, price);
+            } else {
+                Self::repay_from_buffer(&e, &p, -delta)?;
+            }
         }
 
         p.touch(&agent, &symbol_short!("rebal"));
         AgentRan { agent, position, action: symbol_short!("rebal"), delta }.publish(&e);
         Ok(delta)
+    }
+
+    /// Sell exactly enough of the stock to repay, and not a share more.
+    ///
+    /// An Amplify has no vault balance to draw on and no buffer claim: its
+    /// dollars are all in stock, by construction. So a fall is answered the
+    /// only way it can be, by unwinding part of the loop. That is not a
+    /// failure of the design, it is what a multiple means: the stock bought
+    /// with borrowed money is the stock that goes back when the loan shrinks.
+    /// What never happens is selling the deposit itself, because the sale is
+    /// sized to the debt rather than to the position.
+    fn sell_to_repay(e: &Env, m: &Market, p: &PositionClient, amount: i128, price: i128) {
+        // Rounded up, so the sale covers the debt rather than leaving a
+        // remainder that the next pass has to come back for.
+        let units = amount * UNIT / price + 1;
+        p.unsupply(&units, &e.current_contract_address());
+        let usdc = Self::usdc(e);
+        token::Client::new(e, &usdc).transfer(&e.current_contract_address(), &p.address, &amount);
+        p.repay(&amount);
+        let _ = m;
     }
 
     /// Repay now out of the buffer, and ask the vault for the money back. The

@@ -622,3 +622,55 @@ fn the_buffer_is_anyones_to_fill_and_everyones_to_see() {
     assert_eq!(f.c.try_fund_buffer(&stranger, &0), Err(Ok(Error::BadAmount)));
     let _ = f.admin;
 }
+
+#[test]
+fn a_rise_on_an_amplify_buys_stock_rather_than_filling_the_vault() {
+    let f = setup();
+    let id = f.c.amplify_open(&f.user, &f.stock.address, &10_0000000, &30_000);
+    let p = pos_client(&f, &id);
+    let before = p.collateral();
+    let in_vault_before = f.vault.deposited(&id);
+
+    // Up ten percent.
+    f.oracle.set_price(
+        &oracle_contract::Asset::Stellar(f.stock.address.clone()),
+        &(PRICE * 110 / 100),
+    );
+    f.c.rebalance(&f.agent, &id);
+
+    // The borrowing bought stock. This is the whole difference between the
+    // two products once they are open, and the failure it guards against is
+    // the quiet one: send an Amplify's borrowings to the vault and the LTV
+    // still reads correct while the multiple decays.
+    assert!(p.collateral() > before);
+    assert_eq!(f.vault.deposited(&id), in_vault_before);
+    // 6667 rather than 6666: the sale is rounded up by a unit so it covers
+    // the debt rather than leaving a remainder for the next pass.
+    assert_eq!(f.c.health(&id).ltv, 6667);
+}
+
+#[test]
+fn a_fall_on_an_amplify_sells_just_enough_and_not_the_deposit() {
+    let f = setup();
+    let id = f.c.amplify_open(&f.user, &f.stock.address, &10_0000000, &30_000);
+    let p = pos_client(&f, &id);
+    let owed = p.debt();
+    let buffer_before = f.c.buffer();
+
+    f.oracle.set_price(
+        &oracle_contract::Asset::Stellar(f.stock.address.clone()),
+        &(PRICE * 90 / 100),
+    );
+    f.c.rebalance(&f.agent, &id);
+
+    // Stock went back, because an Amplify has no vault balance to draw on:
+    // its dollars are all in stock by construction.
+    assert!(p.collateral() < 30_0000000);
+    assert!(p.debt() < owed);
+    // The buffer is for Earn positions, and this did not touch it.
+    assert_eq!(f.c.buffer(), buffer_before);
+    // And the deposit itself survived: the sale is sized to the debt, not to
+    // the position.
+    assert!(p.collateral() > 10_0000000);
+    assert_eq!(f.c.health(&id).ltv, 6667);
+}
