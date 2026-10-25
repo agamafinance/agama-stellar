@@ -181,13 +181,19 @@ print(json.dumps({'backstop': '$backstop', 'blnd_id': '$blnd', 'pool_hash': '$po
 # ------------------------------------------------------------------ pool ----
 
 # Our lending pool, from our factory, so our backstop counts for it.
+#
+# Every reserve has to be added BEFORE the pool is switched on. Blend puts a
+# one-week timelock on a reserve queued against a pool that is not in setup
+# status, so a pool that is live is a pool whose asset list is frozen for a
+# week. The order of the stages below is not a preference, it is the only
+# order that works.
 pool2() {
   say "Our lending pool"
   if [ -n "$(get blend.pool)" ]; then note "already there, $(get blend.pool)"; return; fi
   local id
   id=$(stellar contract invoke --quiet --id "$(get blend.poolFactory)" --source "$SRC" \
     --network "$NET" -- deploy --admin "$ME" --name '"Agama Stocks"' \
-      --salt "$(salt_of lending-pool/v1)" --oracle "$(get contracts.oracle)" \
+      --salt "$(salt_of lending-pool/v2)" --oracle "$(get contracts.oracle)" \
       --backstop_take_rate 0 --max_positions 4 --min_collateral 0 | tr -d '"')
   put blend.pool "$id"
   note "pool $id"
@@ -228,8 +234,13 @@ print('\n'.join(f'{k}|{v}|7500000|10000000' for k,v in d.items()))
 ")"
   echo "$specs" | while IFS='|' read -r label asset cf lf; do
     if [ -n "$(get "blend.reserves.$label")" ]; then note "$label already a reserve"; continue; fi
+    # A reserve already in the queue makes queue_set_reserve fail with Blend's
+    # BadRequest (1200), which reads like the metadata is wrong and is not: it
+    # is the queue refusing a duplicate. A half-finished run leaves one behind,
+    # so the queueing is allowed to fail and only set_reserve has to succeed.
     stellar contract invoke --quiet --id "$pool" --source "$SRC" --network "$NET" \
-      -- queue_set_reserve --asset "$asset" --metadata "$(reserve_json "$cf" "$lf")" >/dev/null
+      -- queue_set_reserve --asset "$asset" --metadata "$(reserve_json "$cf" "$lf")" \
+      >/dev/null 2>&1 || note "$label was already queued"
     local ix
     ix=$(stellar contract invoke --quiet --id "$pool" --source "$SRC" --network "$NET" \
       -- set_reserve --asset "$asset" | tr -d '"')
@@ -247,24 +258,70 @@ print('\n'.join(f'{k}|{v}|7500000|10000000' for k,v in d.items()))
 # hold many shares of it.
 fund() {
   say "Funding the backstop"
-  local bs comet_id pool
+  local bs comet_id pool usdc
   bs=$(get blend.backstop); comet_id=$(get blend.comet); pool=$(get blend.pool)
-  local lp
-  lp=$(stellar contract invoke --quiet --id "$comet_id" --source "$SRC" --network "$NET" \
-    -- balance --id "$ME" | tr -d '"')
-  note "we hold $lp LP"
-  if [ "$(get blend.backstopFunded)" != "yes" ]; then
-    local horizon; horizon=$(( $(current_ledger) + 500000 ))
+  usdc=$(get blend.usdc)
+
+  # Blend's threshold is NOT a dollar amount. It is
+  #
+  #     bal_blnd^4 * bal_usdc >= 1e25
+  #
+  # on whole units of what sits behind the backstop's LP. BLND to the fourth
+  # power, which is why buying LP with dollars alone works badly: every
+  # one-sided USDC deposit raises the USDC behind our LP and adds no BLND to
+  # the comet at all, so the term that matters most barely moves. Our first
+  # attempt landed at 1.99e24, a factor of five short, and reading the formula
+  # was the only way to know that rather than guess at it.
+  #
+  # There is no BLND to pair with either: its admin is the emitter now, by
+  # design, so it cannot be minted here any more.
+  #
+  # So this loop buys a slice, deposits it, and asks the backstop what it now
+  # holds, until the arithmetic says the pool can be switched on. A comet caps
+  # a one-sided deposit at 30% of what it already holds of that token, and
+  # each deposit raises the cap for the next, so the slice is read from the
+  # comet each pass rather than fixed.
+  local horizon; horizon=$(( $(current_ledger) + 500000 ))
+  inv "$usdc" mint --to "$ME" --amount 100000000000000 >/dev/null
+  inv "$usdc" approve --from "$ME" --spender "$comet_id" --amount 100000000000000 \
+      --expiration_ledger "$horizon" >/dev/null
+
+  local pass=0
+  while [ "$pass" -lt 8 ]; do
+    if [ "$(met_threshold "$bs" "$pool")" = "yes" ]; then break; fi
+    local held slice lp
+    held=$(stellar contract invoke --quiet --id "$usdc" --source "$SRC" --network "$NET" \
+      -- balance --id "$comet_id" | tr -d '"')
+    slice=$(( held * 29 / 100 ))
+    inv "$comet_id" dep_tokn_amt_in_get_lp_tokns_out --token_in "$usdc" \
+        --token_amount_in "$slice" --min_pool_amount_out 1 --user "$ME" >/dev/null
+    lp=$(stellar contract invoke --quiet --id "$comet_id" --source "$SRC" --network "$NET" \
+      -- balance --id "$ME" | tr -d '"')
     inv "$comet_id" approve --from "$ME" --spender "$bs" --amount "$lp" \
         --expiration_ledger "$horizon" >/dev/null
     inv "$bs" deposit --from "$ME" --pool_address "$pool" --amount "$lp" >/dev/null
-    put blend.backstopFunded yes
-    note "deposited"
-  fi
+    pass=$(( pass + 1 ))
+    note "pass $pass, deposited $lp LP"
+  done
+
   stellar contract invoke --quiet --id "$bs" --source "$SRC" --network "$NET" \
     -- pool_data --pool "$pool" | tail -1
   inv "$pool" set_status --pool_status 0 >/dev/null
-  note "pool status $(inv "$pool" get_config | python3 -I -c "import json,sys;print(json.load(sys.stdin)['status'])")"
+  note "pool status $(inv "$pool" get_config \
+    | python3 -I -c "import json,sys;print(json.load(sys.stdin)['status'])")"
+  put blend.backstopFunded yes
+}
+
+# Blend's own arithmetic, read back off the chain rather than assumed.
+met_threshold() {
+  stellar contract invoke --quiet --id "$1" --source "$SRC" --network "$NET" \
+    -- pool_data --pool "$2" | python3 -I -c "
+import json, sys
+d = json.load(sys.stdin)
+blnd = int(d['blnd']) // 10_000_000
+usdc = int(d['usdc']) // 10_000_000
+print('yes' if blnd**4 * usdc >= 10**25 else 'no')
+"
 }
 
 case "${1:-all}" in
