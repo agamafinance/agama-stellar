@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+
+:root {
+  --ink: #191918;
+  --ink-soft: #71716b;
+  --ink-faint: #a3a39c;
+  --paper: #fdfcf9;
+  --card: #ffffff;
+  --hair: #ecebe6;
+  --line: #e1e0da;
+  --agama: #254839;
+}
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Inter', sans-serif;
+  font-feature-settings: 'tnum' 1;
+}

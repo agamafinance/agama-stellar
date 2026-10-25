@@ -1,0 +1,27 @@
+{
+  "name": "agama-stellar-web",
+  "private": true,
+  "scripts": {
+    "presync": "true",
+    "sync": "node scripts/sync.mjs",
+    "predev": "node scripts/sync.mjs",
+    "dev": "next dev -p 3010",
+    "prebuild": "node scripts/sync.mjs",
+    "build": "next build",
+    "start": "next start -p 3010"
+  },
+  "dependencies": {
+    "next": "16.2.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "@stellar/stellar-sdk": "^14.2.0",
+    "@creit.tech/stellar-wallets-kit": "^1.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "typescript": "^5.7.0",
+    "tailwindcss": "^4.1.0",
+    "@tailwindcss/postcss": "^4.1.0"
+  }
+}
