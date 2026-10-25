@@ -332,3 +332,68 @@ fn the_admin_path_is_bounded_like_the_verified_one() {
     // Down by the bound, not to one stroop.
     assert_eq!(f.c.lastprice(&f.tsla).unwrap().price, 4_200_000_000 * 8500 / 10000);
 }
+
+#[test]
+fn a_feed_can_be_moved_and_the_old_one_stops_counting() {
+    let f = setup(3);
+    let old = BytesN::from_array(&f.e, &feed_id("SPY"));
+    let new = BytesN::from_array(&f.e, &feed_id("SPY---PRE_AFTER"));
+    let spy = Asset::Other(Symbol::new(&f.e, "SPY"));
+    f.c.add_feed(&spy, &old);
+
+    f.c.retarget_feed(&spy, &new);
+    assert_eq!(f.c.feed(&spy), Some(new));
+
+    // A report carrying the old ticker no longer finds this asset. Without
+    // unbinding it, a feed deliberately moved away from could keep writing.
+    let stale = payload(&[
+        package(&key(1), &[("SPY", 100_0000000)], 1_700_000_000_000),
+        package(&key(2), &[("SPY", 100_0000000)], 1_700_000_000_000),
+        package(&key(3), &[("SPY", 100_0000000)], 1_700_000_000_000),
+    ]);
+    assert_eq!(
+        f.c.try_push(&Bytes::from_slice(&f.e, &stale)),
+        Err(Ok(Error::NoKnownFeed))
+    );
+
+    // And the new one does.
+    let good = payload(&[
+        // Eight decimals in the payload, seven out of the oracle: RedStone
+        // signs 76_130_000_000 for $761.30 and the contract rescales.
+        package(&key(1), &[("SPY---PRE_AFTER", 76_130_000_000)], 1_700_000_000_000),
+        package(&key(2), &[("SPY---PRE_AFTER", 76_130_000_000)], 1_700_000_000_000),
+        package(&key(3), &[("SPY---PRE_AFTER", 76_130_000_000)], 1_700_000_000_000),
+    ]);
+    f.c.push(&Bytes::from_slice(&f.e, &good));
+    assert_eq!(f.c.lastprice(&spy).unwrap().price, 761_3000000);
+}
+
+#[test]
+fn retargeting_refuses_a_feed_another_asset_already_owns() {
+    let f = setup(3);
+    let nvda = Asset::Other(Symbol::new(&f.e, "NVDA"));
+    f.c.add_feed(&nvda, &BytesN::from_array(&f.e, &feed_id("NVDA")));
+    assert_eq!(
+        f.c.try_retarget_feed(&nvda, &BytesN::from_array(&f.e, &feed_id("TSLA"))),
+        Err(Ok(Error::AlreadyRegistered))
+    );
+    assert_eq!(f.c.feed(&nvda), Some(BytesN::from_array(&f.e, &feed_id("NVDA"))));
+}
+
+#[test]
+fn retargeting_an_unknown_asset_says_so() {
+    let f = setup(3);
+    let what = Asset::Other(Symbol::new(&f.e, "WHAT"));
+    assert_eq!(
+        f.c.try_retarget_feed(&what, &BytesN::from_array(&f.e, &feed_id("TSLA"))),
+        Err(Ok(Error::UnknownAsset))
+    );
+}
+
+#[test]
+fn retargeting_to_the_same_feed_changes_nothing() {
+    let f = setup(3);
+    let id = BytesN::from_array(&f.e, &feed_id("TSLA"));
+    f.c.retarget_feed(&f.tsla, &id);
+    assert_eq!(f.c.feed(&f.tsla), Some(id));
+}

@@ -277,6 +277,27 @@ impl Core {
     /// The session switch. It is admin only and it is not a price: it says
     /// whether the company behind the token is trading, which no signature in
     /// a price report carries.
+    /// Point the protocol at a different oracle.
+    ///
+    /// The live deployment was built without this and the cost showed up
+    /// immediately: the oracle needed one admin function it did not have, and
+    /// because the core's oracle was fixed at construction the only way to
+    /// replace it was to replace the core, which owns the stock tokens, whose
+    /// admin cannot be taken back. A setter here would have made that a single
+    /// transaction.
+    pub fn set_oracle(e: Env, oracle: Address) {
+        Self::admin(&e).require_auth();
+        e.storage().instance().set(&Key::Oracle, &oracle);
+        e.storage().instance().extend_ttl(BUMP, TTL);
+    }
+
+    /// Replace the code behind this address, keeping the storage, the markets
+    /// and the positions.
+    pub fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+        Self::admin(&e).require_auth();
+        e.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
     pub fn set_session(e: Env, token: Address, off_hours: bool) -> Result<(), Error> {
         Self::only_admin(&e);
         let mut m = Self::market(&e, &token)?;

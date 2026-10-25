@@ -112,6 +112,12 @@ enum Key {
     Last(Asset),
 }
 
+#[contractevent(topics = ["feed"])]
+pub struct Retargeted {
+    pub asset: Asset,
+    pub feed: BytesN<32>,
+}
+
 #[contractevent(topics = ["price"])]
 pub struct Priced {
     #[topic]
@@ -173,6 +179,50 @@ impl Oracle {
         e.storage().instance().set(&Key::ByFeed(feed), &asset);
         e.storage().instance().extend_ttl(INSTANCE_BUMP, INSTANCE_TTL);
         Ok(())
+    }
+
+    /// Point an asset at a different feed.
+    ///
+    /// Not a convenience. RedStone renames a feed when its source changes, and
+    /// carries some tickers only under a decorated name: there is no `SPY`
+    /// package, there is `SPY---PRE_AFTER`. Without this, a rename means
+    /// redeploying the oracle, which means repointing the pool and the core,
+    /// which on a protocol whose core owns its tokens means redeploying the
+    /// tokens. One missing admin function, and the blast radius is the whole
+    /// deployment. The live testnet oracle predates this function and pays
+    /// exactly that price: two of its ten markets stay admin-priced.
+    ///
+    /// The old feed id is unbound as well as the new one bound. Leaving it
+    /// would let a report carrying the old ticker keep writing this asset's
+    /// price after it was deliberately moved away from it.
+    pub fn retarget_feed(e: Env, asset: Asset, feed: BytesN<32>) -> Result<(), Error> {
+        Self::admin(&e).require_auth();
+        let old: BytesN<32> = e
+            .storage()
+            .instance()
+            .get(&Key::Feed(asset.clone()))
+            .ok_or(Error::UnknownAsset)?;
+        if old == feed {
+            return Ok(());
+        }
+        if e.storage().instance().has(&Key::ByFeed(feed.clone())) {
+            return Err(Error::AlreadyRegistered);
+        }
+        e.storage().instance().remove(&Key::ByFeed(old));
+        e.storage().instance().set(&Key::Feed(asset.clone()), &feed);
+        e.storage().instance().set(&Key::ByFeed(feed.clone()), &asset);
+        e.storage().instance().extend_ttl(INSTANCE_BUMP, INSTANCE_TTL);
+        Retargeted { asset, feed }.publish(&e);
+        Ok(())
+    }
+
+    /// Replace the code behind this address, keeping the storage.
+    ///
+    /// The reason this exists is the paragraph above: an oracle that cannot be
+    /// fixed in place forces everything that reads it to be replaced too.
+    pub fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+        Self::admin(&e).require_auth();
+        e.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     pub fn set_signers(e: Env, signers: Vec<BytesN<20>>, min_signers: u32) -> Result<(), Error> {
