@@ -56,6 +56,7 @@ const BPS: i128 = 10_000;
 /// Both the stocks and USDC are seven decimals here, which is Stellar's own.
 const UNIT: i128 = 10_000_000;
 
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -698,39 +699,75 @@ impl Core {
 
     // ---- Amplify ----
 
-    /// Borrow against the stock and buy more of the same stock, in one call.
-    /// A loop at L times carries an LTV of (L - 1) / L, so the market's own LTV
-    /// is the ceiling and there is no loop of hops to run.
+    /// Deposit a stock, end up holding a multiple of it, in one call.
+    ///
+    /// `leverage_bps` is a multiple of the deposit, not an LTV: 30_000 is 3x,
+    /// meaning three dollars of stock standing on one of your own. The LTV
+    /// that implies is (L - 1) / L, so the market's own ceiling caps the
+    /// multiple at 1 / (1 - ltv) and nothing here can exceed it.
+    ///
+    /// The product is a loop: borrow against the stock, buy more of the same
+    /// stock, pledge that too, go round again. Each pass borrows against
+    /// everything pledged so far, because the stock the last borrow bought is
+    /// collateral too. Run literally it converges from below and never quite
+    /// arrives: at a 70% market the shortfall after n passes is 0.7^n of the
+    /// deposit, so eight passes reach 3.14x of the 3.33x on offer, and they
+    /// cost sixteen calls into the pool to get there. On Soroban that is not
+    /// a slow transaction, it is one that exceeds the CPU budget and reverts.
+    ///
+    /// So the loop is settled in one step instead of walked. The core
+    /// advances the whole multiple of stock, pledges it, and then borrows
+    /// against the full position and keeps the dollars as payment for what it
+    /// advanced. The end state is identical to the loop's limit, exactly
+    /// rather than approximately, in two calls to the pool instead of
+    /// sixteen. Nothing is borrowed uncollateralised at any point: the stock
+    /// is pledged before the loan it secures exists, and the transaction
+    /// either reaches that state or reverts to none of it.
     pub fn amplify_open(
         e: Env,
         owner: Address,
         token: Address,
         amount: i128,
-        target_bps: u32,
+        leverage_bps: u32,
     ) -> Result<Address, Error> {
         owner.require_auth();
         if amount <= 0 {
             return Err(Error::BadAmount);
         }
+        if leverage_bps <= BPS as u32 {
+            return Err(Error::BadTarget);
+        }
         let m = Self::live_market(&e, &token)?;
         let (max_ltv, _) = Self::terms(&m);
-        if target_bps == 0 || target_bps > max_ltv {
+        // A multiple of L carries an LTV of (L - 1) / L. Rounded up, so a
+        // multiple the market cannot quite hold is refused rather than
+        // silently trimmed to one it can.
+        let want_ltv = ((leverage_bps as i128 - BPS) * BPS + leverage_bps as i128 - 1)
+            / leverage_bps as i128;
+        if want_ltv > max_ltv as i128 {
             return Err(Error::BadTarget);
         }
         let price = Self::price(&e, &token)?;
 
+        // The target is stored as an LTV, the same as an Earn's, so the
+        // agents hold a multiple without knowing it is one: holding
+        // (L - 1) / L IS holding L.
+        let target_bps = want_ltv as u32;
         let pos = Self::get_or_deploy(&e, &owner, &m, Product::Amplify, target_bps);
         let p = PositionClient::new(&e, &pos);
 
         token::Client::new(&e, &token).transfer(&owner, &pos, &amount);
-        p.supply(&amount);
-        p.set_target(&target_bps);
+        let advance = amount * (leverage_bps as i128 - BPS) / BPS;
+        let owed = advance * price / UNIT;
 
-        let borrow = Self::debt_at(p.collateral(), price, target_bps) - p.debt();
-        if borrow > 0 {
-            p.borrow(&borrow, &e.current_contract_address());
-            let bought = Self::buy_stock_from_core(&e, &m, &pos, borrow, price);
-            p.supply(&bought);
+        // Pledged first, borrowed second. The order is the whole safety
+        // argument: at the moment the loan exists, the stock it bought is
+        // already collateral behind it.
+        Self::buy_stock_from_core(&e, &m, &pos, owed, price);
+        p.supply(&(amount + advance));
+        p.set_target(&target_bps);
+        if owed > 0 {
+            p.borrow(&owed, &e.current_contract_address());
         }
 
         Opened {
@@ -739,7 +776,7 @@ impl Core {
             position: pos.clone(),
             product: Product::Amplify,
             collateral: amount,
-            borrowed: borrow.max(0),
+            borrowed: owed,
             target_bps,
         }
         .publish(&e);

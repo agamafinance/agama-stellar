@@ -373,7 +373,7 @@ fn the_position_address_is_the_same_one_every_time() {
 fn earn_and_amplify_are_two_positions_for_one_owner() {
     let f = setup();
     let earn = f.c.earn_deposit(&f.user, &f.stock.address, &5_0000000, &LTV);
-    let amp = f.c.amplify_open(&f.user, &f.stock.address, &5_0000000, &LTV);
+    let amp = f.c.amplify_open(&f.user, &f.stock.address, &5_0000000, &20_000);
     assert_ne!(earn, amp);
     assert_eq!(f.c.positions().len(), 2);
 }
@@ -510,17 +510,46 @@ fn closing_repays_everything_and_hands_the_stock_back() {
 }
 
 #[test]
-fn amplify_buys_more_of_the_same_stock_in_one_call() {
+fn amplify_loops_until_it_holds_the_multiple() {
     let f = setup();
-    let id = f.c.amplify_open(&f.user, &f.stock.address, &10_0000000, &LTV);
+    // Three times the deposit: thirty shares standing on ten.
+    let id = f.c.amplify_open(&f.user, &f.stock.address, &10_0000000, &30_000);
     let p = pos_client(&f, &id);
 
-    // Ten shares in, 2,940 borrowed, which buys seven more at 420.
-    assert_eq!(p.debt(), 2_940_0000000);
-    assert_eq!(p.collateral(), 17_0000000);
-    // A loop at 70% carries 1 / (1 - 0.7) = 3.33x; one pass is 1.7x, which is
-    // what a single borrow against the first deposit can be.
-    assert_eq!(f.c.health(&id).ltv, 4117);
+    assert_eq!(p.collateral(), 30_0000000);
+    // Three dollars of stock on one of your own is two borrowed, which at
+    // 420 a share is 8,400.
+    assert_eq!(p.debt(), 8_400_0000000);
+    // A multiple of L carries an LTV of (L - 1) / L: two thirds.
+    assert_eq!(f.c.health(&id).ltv, 6666);
+}
+
+#[test]
+fn the_market_ceiling_is_what_caps_the_multiple() {
+    let f = setup();
+    // 1 / (1 - 0.7) is 3.33x, so 3.3x is the most a 70% market will hold and
+    // the LTV it carries lands just under the ceiling rather than on it.
+    let id = f.c.amplify_open(&f.user, &f.stock.address, &10_0000000, &33_000);
+    let p = pos_client(&f, &id);
+    assert_eq!(p.collateral(), 33_0000000);
+    assert_eq!(p.debt(), 9_660_0000000);
+    assert_eq!(f.c.health(&id).ltv, 6969);
+    assert!(f.c.health(&id).ltv <= f.c.health(&id).max_ltv);
+}
+
+#[test]
+fn a_multiple_the_market_cannot_hold_is_refused() {
+    let f = setup();
+    // 1 / (1 - 0.7) is 3.33x. Four times would need an LTV of 75%.
+    assert_eq!(
+        f.c.try_amplify_open(&f.user, &f.stock.address, &10_0000000, &40_000),
+        Err(Ok(Error::BadTarget))
+    );
+    // And so is standing still: a multiple of one borrows nothing.
+    assert_eq!(
+        f.c.try_amplify_open(&f.user, &f.stock.address, &10_0000000, &10_000),
+        Err(Ok(Error::BadTarget))
+    );
 }
 
 #[test]
