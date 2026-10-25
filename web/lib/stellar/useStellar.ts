@@ -45,7 +45,14 @@ export function useSnapshot(owner: string | null) {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/snapshot${owner ? `?owner=${owner}` : ''}`, { cache: 'no-store' });
+      // Under the app's own path prefix, not at the root. A rewrite on
+      // app.agama.finance only forwards /stellar-rwa/*, so an API route at
+      // /api/snapshot is served by the product app sitting in front of this
+      // one: it answers its own 404 page, and the first thing the screen says
+      // is that HTML is not valid JSON.
+      const r = await fetch(`/stellar-rwa/api/snapshot${owner ? `?owner=${owner}` : ''}`, {
+        cache: 'no-store',
+      });
       if (!r.ok) throw new Error((await r.json()).error ?? 'the network is not answering');
       const next = (await r.json()) as Snapshot;
       if (!live.current) return;
