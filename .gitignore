@@ -4,4 +4,5 @@ node_modules/
 .env.local
 .stellar/
 *.wasm
+!vendor/*.wasm
 .DS_Store
