@@ -653,9 +653,15 @@ impl Core {
         // type: same shape, different name, so it is compared on its side.
         if delta > 0 {
             if amplify {
-                p.borrow(&delta, &e.current_contract_address());
+                // Pledged before borrowed, the same order as an open, and for
+                // the same reason: the pool checks health at the moment of the
+                // borrow, not at the end of the transaction. Borrow first and
+                // the position is momentarily holding a loan against
+                // collateral that has not arrived yet, which Blend refuses
+                // with InvalidHf, a long way from the line that caused it.
                 let bought = Self::buy_stock_from_core(&e, &m, &p.address, delta, price);
                 p.supply(&bought);
+                p.borrow(&delta, &e.current_contract_address());
             } else {
                 Self::borrow_into_vault(&e, &p, delta);
             }
@@ -682,13 +688,19 @@ impl Core {
     /// What never happens is selling the deposit itself, because the sale is
     /// sized to the debt rather than to the position.
     fn sell_to_repay(e: &Env, m: &Market, p: &PositionClient, amount: i128, price: i128) {
-        // Rounded up, so the sale covers the debt rather than leaving a
-        // remainder that the next pass has to come back for.
-        let units = amount * UNIT / price + 1;
-        p.unsupply(&units, &e.current_contract_address());
+        // Repaid before the stock leaves, which is the mirror of pledging
+        // before borrowing and refused for the same reason if done the other
+        // way round: taking collateral out while the debt still stands raises
+        // the LTV, and a position being rescued from a fall has no room for
+        // that. The core advances the dollars and takes the stock as payment
+        // once the debt is gone.
         let usdc = Self::usdc(e);
         token::Client::new(e, &usdc).transfer(&e.current_contract_address(), &p.address, &amount);
         p.repay(&amount);
+        // Rounded up, so the sale covers what was advanced rather than
+        // leaving a remainder the next pass has to come back for.
+        let units = amount * UNIT / price + 1;
+        p.unsupply(&units, &e.current_contract_address());
         let _ = m;
     }
 
@@ -880,8 +892,9 @@ impl Core {
         // stock at the oracle price and pays the dollars it is holding.
         let owed = p.debt();
         if owed > 0 {
-            let units = owed * UNIT / price + 1;
-            p.unsupply(&units, &e.current_contract_address());
+            // Repaid first, then the stock that pays for it leaves. The other
+            // order takes collateral out from under a live debt, which the
+            // pool refuses.
             let usdc = Self::usdc(&e);
             token::Client::new(&e, &usdc).transfer(
                 &e.current_contract_address(),
@@ -889,6 +902,8 @@ impl Core {
                 &owed,
             );
             p.repay(&owed);
+            let units = owed * UNIT / price + 1;
+            p.unsupply(&units, &e.current_contract_address());
             let _ = m;
         }
         let left = p.collateral();
