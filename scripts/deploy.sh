@@ -14,6 +14,7 @@
 #   ./scripts/deploy.sh core       the protocol, and its markets
 #   ./scripts/deploy.sh seed       liquidity, the buffer, and a first price
 #   ./scripts/deploy.sh prices     refresh the admin-set prices
+#   ./scripts/deploy.sh upgrade core   put the wasm just built behind a live id
 #   ./scripts/deploy.sh all        in that order
 set -euo pipefail
 
@@ -294,8 +295,32 @@ for sym, addr in d['stocks'].items():
   done
 }
 
+# ---------------------------------------------------------------- upgrade ----
+
+# Put the wasm just built behind an address that is already live.
+#
+# The contract keeps its id and its storage, so nothing that points at it has
+# to move: the markets, the Blend reserves, the positions and the front end
+# all go on working. Only `core` and `oracle` carry an `upgrade` entry point;
+# the stocks and the positions do not, which is why the stocks are the one
+# thing in here that has ever had to be replaced.
+upgrade() {
+  local which=${1:?which contract}
+  local id
+  id=$(get "contracts.$which")
+  [ -n "$id" ] || { echo "no deployed $which in $OUT" >&2; exit 2; }
+  say "Upgrading $which, $id"
+  local h
+  h=$(stellar contract upload --quiet --wasm "$WASM/$which.wasm" --source "$SRC" --network "$NET")
+  note "wasm $h"
+  inv "$id" upgrade --new_wasm_hash "$h" >/dev/null
+  put "wasm.$which" "$h"
+  note "$(inv "$id" version)"
+}
+
 case "${1:-all}" in
   upload) upload ;;
+  upgrade) upgrade "${2:?which contract}" ;;
   stocks) stocks ;;
   oracle) oracle ;;
   vault) vault ;;

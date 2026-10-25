@@ -718,3 +718,126 @@ fn the_faucet_says_how_long_each_one_has_to_wait() {
     assert!(waiting.get(0).unwrap() > 0);
     assert_eq!(waiting.get(1).unwrap(), 0);
 }
+
+#[test]
+fn the_unsigned_drip_needs_nobodys_signature() {
+    let f = setup();
+    let visitor = Address::generate(&f.e);
+    // No mocked auth at all: the real auth tree is checked, and this call has
+    // none to satisfy. That is the whole point of it. A smart account
+    // authorizes one contract per rule its owner approves by passkey, so the
+    // signed faucet's twelve contexts are twelve confirmations; this is zero.
+    f.e.set_auths(&[]);
+    assert_eq!(f.c.faucet_for(&visitor), 1);
+    assert_eq!(f.stock.balance(&visitor), f.stock.drip());
+}
+
+#[test]
+fn the_unsigned_drip_waits_an_hour_per_address() {
+    let f = setup();
+    let visitor = Address::generate(&f.e);
+    f.c.faucet_for(&visitor);
+    assert_eq!(f.c.try_faucet_for(&visitor), Err(Ok(Error::FaucetCooldown)));
+    assert!(f.c.faucet_for_in(&visitor) > 0);
+
+    // Another address is another address, and the hour is its own.
+    let other = Address::generate(&f.e);
+    assert_eq!(f.c.faucet_for_in(&other), 0);
+    assert_eq!(f.c.faucet_for(&other), 1);
+
+    f.e.ledger().set_timestamp(f.e.ledger().timestamp() + 3600);
+    assert_eq!(f.c.faucet_for_in(&visitor), 0);
+    assert_eq!(f.c.faucet_for(&visitor), 1);
+    assert_eq!(f.stock.balance(&visitor), f.stock.drip() * 2);
+}
+
+/// A core whose dollar is one of these stand-in tokens rather than a stellar
+/// asset contract, which is what testnet actually has: a dollar with a faucet
+/// of its own.
+fn setup_with_dripping_dollar() -> (Env, CoreClient<'static>, stock::StockClient<'static>, stock::StockClient<'static>) {
+    let e = Env::default();
+    e.mock_all_auths();
+    e.ledger().set_timestamp(1_700_000_000);
+    let admin = Address::generate(&e);
+
+    let dollar_id = e.register(
+        stock::Stock,
+        (
+            admin.clone(),
+            7u32,
+            String::from_str(&e, "Dollar"),
+            String::from_str(&e, "USDC"),
+            100_0000000i128,
+            3600u64,
+        ),
+    );
+    let stock_id = e.register(
+        stock::Stock,
+        (
+            admin.clone(),
+            7u32,
+            String::from_str(&e, "Tesla"),
+            String::from_str(&e, "TSLAx"),
+            10_0000000i128,
+            3600u64,
+        ),
+    );
+    let dollar = stock::StockClient::new(&e, &dollar_id);
+    let stock = stock::StockClient::new(&e, &stock_id);
+    let wasm = e
+        .deployer()
+        .upload_contract_wasm(Bytes::from_slice(&e, POSITION_WASM));
+    let core_id = e.register(
+        Core,
+        (
+            admin.clone(),
+            dollar_id.clone(),
+            USDC_IX,
+            Address::generate(&e),
+            Address::generate(&e),
+            Address::generate(&e),
+            wasm,
+            MAX_AGE,
+        ),
+    );
+    let c = CoreClient::new(&e, &core_id);
+    c.add_market(&stock_id, &STOCK_IX, &LTV, &THRESHOLD, &OFF_HOURS);
+    stock.set_admin(&core_id);
+    // A buffer of a thousand dollars, and nothing above it.
+    dollar.mint(&admin, &1_000_0000000);
+    c.fund_buffer(&admin, &1_000_0000000);
+    (e, c, stock, dollar)
+}
+
+#[test]
+fn the_unsigned_drip_pays_the_dollar_out_of_what_is_above_the_buffer() {
+    let (e, c, stock, dollar) = setup_with_dripping_dollar();
+    let visitor = Address::generate(&e);
+    let buffer = c.buffer();
+
+    // Two assets: the stock minted, the dollar paid out of the hundred the
+    // core just claimed from the dollar's own faucet.
+    assert_eq!(c.faucet_for(&visitor), 2);
+    assert_eq!(stock.balance(&visitor), stock.drip());
+    assert_eq!(dollar.balance(&visitor), dollar.drip());
+    // The buffer is for falling positions. A visitor's test dollars do not
+    // come out of it, and the number says so.
+    assert_eq!(c.buffer(), buffer);
+    assert_eq!(dollar.balance(&c.address), buffer);
+}
+
+#[test]
+fn a_dollar_the_core_cannot_cover_does_not_cost_the_visitor_their_stock() {
+    let (e, c, stock, dollar) = setup_with_dripping_dollar();
+    let first = Address::generate(&e);
+    let second = Address::generate(&e);
+    // The first visitor takes the hour's hundred dollars.
+    assert_eq!(c.faucet_for(&first), 2);
+    // The second arrives inside the same hour, so the dollar's faucet gives
+    // the core nothing and the buffer is not available. The stock still
+    // arrives, because a dollar nobody can pay is not a reason to withhold it.
+    assert_eq!(c.faucet_for(&second), 1);
+    assert_eq!(stock.balance(&second), stock.drip());
+    assert_eq!(dollar.balance(&second), 0);
+    assert_eq!(dollar.balance(&c.address), c.buffer());
+}

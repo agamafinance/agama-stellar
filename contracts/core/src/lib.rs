@@ -55,6 +55,9 @@ const BUMP: u32 = 30 * DAY;
 const BPS: i128 = 10_000;
 /// Both the stocks and USDC are seven decimals here, which is Stellar's own.
 const UNIT: i128 = 10_000_000;
+/// How long an address waits between unsigned drips. The same hour each token
+/// asks for, so the two faucets cannot be alternated to halve it.
+const FAUCET_COOLDOWN: u64 = 3600;
 
 
 #[contracterror]
@@ -77,6 +80,8 @@ pub enum Error {
     /// Health is above the threshold: there is nothing to liquidate.
     Healthy = 11,
     Paused = 12,
+    /// This address has already been served inside the cooldown.
+    FaucetCooldown = 13,
 }
 
 #[contracttype]
@@ -137,6 +142,8 @@ enum Key {
     Pos(Address, Address, Product),
     /// Every position, so an agent can walk them without an indexer.
     All,
+    /// When this address last took the unsigned drip.
+    Drip(Address),
 }
 
 #[contractevent(topics = ["opened"])]
@@ -467,6 +474,85 @@ impl Core {
             got += 1;
         }
         Ok(got)
+    }
+
+    /// The same assets, with nobody's signature on the request.
+    ///
+    /// `faucet` above leans on the caller's signature covering the whole tree:
+    /// eleven token faucets, each checking it on the way down. A wallet that
+    /// can sign for any contract gives that in one approval. A smart account
+    /// cannot: it authorizes per contract, by a rule its owner approves one at
+    /// a time, so the same click would be twelve passkey confirmations before
+    /// anything arrives. That is not a faucet.
+    ///
+    /// So this asks nobody to authorize anything. The core is the stocks'
+    /// admin, so it mints them outright. The dollar is not ours to mint, so it
+    /// comes out of what this contract holds above the buffer, and the dollar's
+    /// own faucet refills that whenever its own cooldown has passed. The
+    /// buffer is never touched: it is what answers a falling position, and a
+    /// visitor's test dollars are not worth spending it on.
+    ///
+    /// Open to anyone, for any address, like every faucet here. It mints a
+    /// fixed quantity on a cooldown, so there is nothing to game: the worst a
+    /// stranger can do with it is give somebody else their hour's share.
+    pub fn faucet_for(e: Env, to: Address) -> Result<u32, Error> {
+        let now = e.ledger().timestamp();
+        let key = Key::Drip(to.clone());
+        if let Some(last) = e.storage().persistent().get::<_, u64>(&key) {
+            if now < last + FAUCET_COOLDOWN {
+                return Err(Error::FaucetCooldown);
+            }
+        }
+        e.storage().persistent().set(&key, &now);
+        e.storage().persistent().extend_ttl(&key, BUMP, TTL);
+
+        let me = e.current_contract_address();
+        let mut got = 0u32;
+        let markets: Vec<Address> = e.storage().instance().get(&Key::Markets).unwrap();
+        for token in markets.iter() {
+            let amount = Self::drip_size(&e, &token);
+            if amount > 0 {
+                e.invoke_contract::<()>(
+                    &token,
+                    &Symbol::new(&e, "mint"),
+                    Vec::from_array(&e, [to.into_val(&e), amount.into_val(&e)]),
+                );
+                got += 1;
+            }
+        }
+
+        let usdc = Self::usdc(&e);
+        // Refill first, so the hour's claim is paid out of what the dollar's
+        // own faucet just gave rather than out of the last visitor's share.
+        Self::drip(&e, &usdc, &me);
+        let amount = Self::drip_size(&e, &usdc);
+        let held = token::Client::new(&e, &usdc).balance(&me);
+        let buffer: i128 = e.storage().instance().get(&Key::Buffer).unwrap();
+        if amount > 0 && held - buffer >= amount {
+            token::Client::new(&e, &usdc).transfer(&me, &to, &amount);
+            got += 1;
+        }
+        e.storage().instance().extend_ttl(BUMP, TTL);
+        Ok(got)
+    }
+
+    /// What one token's faucet hands out, or zero when it has none.
+    fn drip_size(e: &Env, token: &Address) -> i128 {
+        e.try_invoke_contract::<i128, soroban_sdk::Error>(
+            token,
+            &Symbol::new(e, "drip"),
+            Vec::new(e),
+        )
+        .map(|r| r.unwrap_or(0))
+        .unwrap_or(0)
+    }
+
+    /// How long `who` has to wait before the unsigned drip gives again.
+    pub fn faucet_for_in(e: Env, who: Address) -> u64 {
+        match e.storage().persistent().get::<_, u64>(&Key::Drip(who)) {
+            Some(last) => (last + FAUCET_COOLDOWN).saturating_sub(e.ledger().timestamp()),
+            None => 0,
+        }
     }
 
     /// One token's faucet, and whether it gave anything.
