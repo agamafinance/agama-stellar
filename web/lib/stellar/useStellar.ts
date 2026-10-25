@@ -11,12 +11,33 @@ export type { MarketView as Market, PositionView as Position, Snapshot };
 
 const server = new rpc.Server(RPC);
 
-/// One snapshot, refreshed on a timer and after every action.
+/// How often to ask, and only while somebody is looking.
 ///
-/// The fan-out runs on the server, so this is a single request. When it fails
-/// the last good snapshot is kept and the page says how old it is, because a
-/// page that empties itself every time an RPC hiccups is worse than one that
-/// admits to being a minute behind.
+/// The visibility gate is not a nicety, it is the whole difference between a
+/// page that costs a few hundred requests a month and one that costs a
+/// million. A tab left open on a 20 second timer is 4,320 requests a DAY, for
+/// nobody, forever: ten forgotten tabs over a month is past the entire plan.
+/// Hidden, this asks for nothing at all.
+///
+/// Connected is a minute, because a position's numbers move when the price
+/// does and the keeper pushes every few minutes. Not connected is two, because
+/// the markets screen is the same for everyone and nothing on it moves faster
+/// than that.
+const POLL_CONNECTED = 60_000;
+const POLL_ANONYMOUS = 120_000;
+
+/// One snapshot, refreshed while the tab is visible and after every action.
+///
+/// The fan-out runs on the server, so this is a single request rather than the
+/// seventy contract reads behind it. That is the opposite trade from the
+/// Solana build this app is forked from, which reads the chain straight from
+/// the browser: its polling costs its RPC provider and nothing else, ours
+/// costs a request on our own plan. So ours has to be far more careful about
+/// how often it asks.
+///
+/// When a request fails the last good snapshot is kept and the page says how
+/// old it is, because a page that empties itself every time an RPC hiccups is
+/// worse than one that admits to being a minute behind.
 export function useSnapshot(owner: string | null) {
   const [snap, setSnap] = useState<Snapshot>();
   const [error, setError] = useState<string>();
@@ -37,13 +58,39 @@ export function useSnapshot(owner: string | null) {
 
   useEffect(() => {
     live.current = true;
+    let id: ReturnType<typeof setInterval> | undefined;
+
+    const stop = () => {
+      if (id !== undefined) clearInterval(id);
+      id = undefined;
+    };
+    const start = () => {
+      stop();
+      id = setInterval(load, owner ? POLL_CONNECTED : POLL_ANONYMOUS);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        // One catch-up read on the way back, not a backlog of the ones that
+        // were skipped. Somebody returning to the tab wants today's number,
+        // not the four they missed.
+        void load();
+        start();
+      } else {
+        stop();
+      }
+    };
+
     void load();
-    const id = setInterval(load, 20_000);
+    if (document.visibilityState === 'visible') start();
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       live.current = false;
-      clearInterval(id);
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [load]);
+  }, [load, owner]);
 
   return { snap, error, refresh: load };
 }
