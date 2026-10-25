@@ -674,3 +674,47 @@ fn a_fall_on_an_amplify_sells_just_enough_and_not_the_deposit() {
     assert!(p.collateral() > 10_0000000);
     assert_eq!(f.c.health(&id).ltv, 6667);
 }
+
+#[test]
+fn the_faucet_hands_out_every_market_in_one_call() {
+    let f = setup();
+    let visitor = Address::generate(&f.e);
+    assert_eq!(f.stock.balance(&visitor), 0);
+
+    // One market in this fixture. The dollar here is a stellar asset
+    // contract, which has no faucet at all, and it is skipped exactly the way
+    // a token on cooldown is: not counted, not fatal. On testnet the dollar
+    // is the same SEP-41 as the stocks and does drip.
+    assert_eq!(f.c.faucet(&visitor), 1);
+    assert!(f.stock.balance(&visitor) > 0);
+}
+
+#[test]
+fn a_token_on_cooldown_does_not_take_the_others_down_with_it() {
+    let f = setup();
+    let visitor = Address::generate(&f.e);
+    f.stock.faucet(&visitor);
+    let after_one = f.stock.balance(&visitor);
+
+    // Nothing reverts, nothing is given, and the call says so. A click that
+    // reverted the other ten because one was claimed four minutes ago reads
+    // as a broken faucet.
+    assert_eq!(f.c.faucet(&visitor), 0);
+    assert_eq!(f.stock.balance(&visitor), after_one);
+}
+
+#[test]
+fn the_faucet_says_how_long_each_one_has_to_wait() {
+    let f = setup();
+    let visitor = Address::generate(&f.e);
+    let ready = f.c.faucet_in(&visitor);
+    assert_eq!(ready.len(), 2);
+    assert!(ready.iter().all(|s| s == 0));
+
+    f.c.faucet(&visitor);
+    // The market is waiting now; the stellar asset contract has nothing to
+    // say and reports zero rather than failing the read.
+    let waiting = f.c.faucet_in(&visitor);
+    assert!(waiting.get(0).unwrap() > 0);
+    assert_eq!(waiting.get(1).unwrap(), 0);
+}

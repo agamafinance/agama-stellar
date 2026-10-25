@@ -440,6 +440,67 @@ impl Core {
         Ok(Health { collateral, debt, ltv, max_ltv, threshold })
     }
 
+    /// Every market's faucet and the dollar's, in one call.
+    ///
+    /// Eleven tokens is eleven wallet approvals if the screen asks for them
+    /// one at a time, and a testnet whose first step is eleven signatures is
+    /// a testnet most people leave at the first one. The user signs once and
+    /// their signature covers the whole tree, which is what satisfies each
+    /// token's own `to.require_auth()` on the way down.
+    ///
+    /// A token on cooldown is skipped rather than fatal. The alternative is a
+    /// click that reverts the other ten because one of them was claimed four
+    /// minutes ago, which is the sort of thing that reads as "the faucet is
+    /// broken".
+    pub fn faucet(e: Env, to: Address) -> Result<u32, Error> {
+        to.require_auth();
+        let mut got = 0u32;
+        // Addresses, not Markets: Key::Markets holds the token list. Reading
+        // it as the wrong type compiles perfectly well and fails at runtime.
+        let markets: Vec<Address> = e.storage().instance().get(&Key::Markets).unwrap();
+        for token in markets.iter() {
+            if Self::drip(&e, &token, &to) {
+                got += 1;
+            }
+        }
+        if Self::drip(&e, &Self::usdc(&e), &to) {
+            got += 1;
+        }
+        Ok(got)
+    }
+
+    /// One token's faucet, and whether it gave anything.
+    fn drip(e: &Env, token: &Address, to: &Address) -> bool {
+        e.try_invoke_contract::<i128, soroban_sdk::Error>(
+            token,
+            &Symbol::new(e, "faucet"),
+            Vec::from_array(e, [to.into_val(e)]),
+        )
+        .is_ok()
+    }
+
+    /// How long `who` has to wait on each market, and on the dollar, before
+    /// the faucet gives again. Zero means ready.
+    pub fn faucet_in(e: Env, who: Address) -> Vec<u64> {
+        let markets: Vec<Address> = e.storage().instance().get(&Key::Markets).unwrap();
+        let mut out = Vec::new(&e);
+        for token in markets.iter() {
+            out.push_back(Self::wait_for(&e, &token, &who));
+        }
+        out.push_back(Self::wait_for(&e, &Self::usdc(&e), &who));
+        out
+    }
+
+    fn wait_for(e: &Env, token: &Address, who: &Address) -> u64 {
+        e.try_invoke_contract::<u64, soroban_sdk::Error>(
+            token,
+            &Symbol::new(e, "faucet_in"),
+            Vec::from_array(e, [who.into_val(e)]),
+        )
+        .map(|r| r.unwrap_or(0))
+        .unwrap_or(0)
+    }
+
     // ---- positions ----
 
     fn get_or_deploy(
