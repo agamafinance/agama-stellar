@@ -1,19 +1,31 @@
-import type { Metadata } from 'next'
-import './globals.css'
-import { Nav } from './nav'
+import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
+import './globals.css';
+import { AppFrame } from '@/components/AppFrame';
+import { Providers } from './providers';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'Agama on Stellar',
-  description: 'Deposit the stock, keep the stock, earn on its value.',
-}
+  title: {
+    default: 'Agama',
+    template: 'Agama | %s',
+  },
+  description: 'Earn yield backed by RWA.',
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen">
-        <Nav />
-        <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-10 md:px-10">{children}</main>
+    <html lang="en" className={`dark ${inter.variable}`} suppressHydrationWarning>
+      <body className="min-h-screen bg-bg text-fg antialiased" suppressHydrationWarning>
+        <Providers>
+          <AppFrame>{children}</AppFrame>
+        </Providers>
       </body>
     </html>
-  )
+  );
 }

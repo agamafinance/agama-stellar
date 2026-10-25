@@ -1,0 +1,6 @@
+{
+  "//": "Strict typecheck of everything this deployment serves. The build skips type errors (next.config.mjs), so this is the gate, and CI runs it.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["next-env.d.ts", "app/**/*.tsx", "components/**/*.tsx", "lib/**/*.ts", "lib/**/*.tsx"]
+}
