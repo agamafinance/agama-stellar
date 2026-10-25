@@ -2,14 +2,18 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { PASSPHRASE } from './config';
+
 const KEY = 'agama-stellar:wallet';
 
-type KitModule = typeof import('@creit.tech/stellar-wallets-kit');
-type Kit = import('@creit.tech/stellar-wallets-kit').StellarWalletsKit;
 type WalletOption = { id: string; name: string; icon?: string; isAvailable: boolean };
 
 type Ctx = {
   address: string | null;
+  /// True when the connected address is a smart account (a contract, so a
+  /// Nido passkey account) rather than a keypair. Every screen that signs
+  /// branches on this.
+  smart: boolean;
   connecting: boolean;
   error?: string;
   detected: WalletOption[];
@@ -23,6 +27,7 @@ type Ctx = {
 
 const WalletContext = createContext<Ctx>({
   address: null,
+  smart: false,
   connecting: false,
   detected: [],
   pickerOpen: false,
@@ -40,8 +45,35 @@ const WalletContext = createContext<Ctx>({
 /// It reads `window` at import time, so pulling it in at module scope breaks
 /// the server render. Importing it inside an effect is not a workaround for
 /// that, it is the only shape that works.
-let kit: Kit | null = null;
-let mod: KitModule | null = null;
+///
+/// Version 2 of the kit is a static class rather than an instance, so there is
+/// nothing to hold here but the promise that it was configured once.
+type Kit = typeof import('@creit.tech/stellar-wallets-kit').StellarWalletsKit;
+let kitPromise: Promise<Kit> | null = null;
+
+function loadKit(): Promise<Kit> {
+  kitPromise ??= (async () => {
+    const [{ StellarWalletsKit, Networks }, { defaultModules }, { NidoModule }] = await Promise.all([
+      import('@creit.tech/stellar-wallets-kit'),
+      import('@creit.tech/stellar-wallets-kit/modules/utils'),
+      import('@nidohq/stellar-wallets-kit-module'),
+    ]);
+    // Nido is a hosted passkey wallet, so there is nothing to install and it
+    // offers itself to everyone. Its module needs the deployment's domain
+    // because it runs at our origin and cannot infer it; test.nido.fyi is the
+    // only one there is, and it is testnet, which is where this app lives.
+    StellarWalletsKit.init({
+      modules: [...defaultModules(), new NidoModule({ base: 'test.nido.fyi', networkPassphrase: PASSPHRASE })],
+      network: Networks.TESTNET,
+    });
+    return StellarWalletsKit;
+  })();
+  return kitPromise;
+}
+
+/// GhostSig reports itself available in every browser, because all it needs is
+/// window.open, so it would be offered to people who have never heard of it.
+const HIDDEN = new Set(['ghostsig']);
 
 export function StellarWalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
@@ -53,29 +85,26 @@ export function StellarWalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      mod = await import('@creit.tech/stellar-wallets-kit');
+      const kit = await loadKit();
+      const all = await kit.refreshSupportedWallets();
       if (!alive) return;
-      kit ??= new mod.StellarWalletsKit({
-        network: mod.WalletNetwork.TESTNET,
-        selectedWalletId: mod.FREIGHTER_ID,
-        modules: mod.allowAllModules(),
-      });
-      const all = await kit.getSupportedWallets();
-      if (!alive) return;
-      setDetected(all.filter((w) => w.isAvailable));
+      setDetected(all.filter((w) => w.isAvailable && !HIDDEN.has(w.id.toLowerCase())));
 
-      // Reconnect silently. The wallet still has to approve each signature,
-      // so remembering which one was chosen costs the user nothing and saves
-      // them a click on every reload.
+      // Come back connected. A kit wallet still approves every signature, and
+      // a Nido account signs with the session key it already granted, so
+      // remembering the choice costs the user nothing and saves them a click
+      // on every reload. The address is remembered with it rather than asked
+      // for again: Nido's picker is a popup, and a popup on page load is
+      // either blocked or unwelcome.
       const saved = localStorage.getItem(KEY);
-      if (saved) {
-        try {
-          kit.setWallet(saved);
-          const { address } = await kit.getAddress();
-          if (alive) setAddress(address);
-        } catch {
-          localStorage.removeItem(KEY);
-        }
+      if (!saved) return;
+      try {
+        const { id, address } = JSON.parse(saved) as { id: string; address?: string };
+        kit.setWallet(id);
+        const a = address ?? (await kit.getAddress()).address;
+        if (alive) setAddress(a);
+      } catch {
+        localStorage.removeItem(KEY);
       }
     })();
     return () => {
@@ -84,13 +113,13 @@ export function StellarWalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connectTo = useCallback(async (w: WalletOption) => {
-    if (!kit) return;
     setConnecting(true);
     setError(undefined);
     try {
+      const kit = await loadKit();
       kit.setWallet(w.id);
-      const { address } = await kit.getAddress();
-      localStorage.setItem(KEY, w.id);
+      const { address } = await kit.fetchAddress();
+      localStorage.setItem(KEY, JSON.stringify({ id: w.id, address }));
       setAddress(address);
       setPickerOpen(false);
     } catch (e) {
@@ -101,7 +130,9 @@ export function StellarWalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connect = useCallback(() => {
-    // One wallet installed is not a choice, so skip the menu.
+    // One wallet installed is not a choice, so skip the menu. Nido is always
+    // one of them, so in practice there is always a menu now, which is the
+    // point: a passkey account is an option for somebody with no extension.
     if (detected.length === 1) void connectTo(detected[0]);
     else setPickerOpen(true);
   }, [detected, connectTo]);
@@ -109,19 +140,34 @@ export function StellarWalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     localStorage.removeItem(KEY);
     setAddress(null);
+    void loadKit()
+      .then((kit) => kit.disconnect())
+      .catch(() => {
+        // A wallet that will not let go is still disconnected here.
+      });
   }, []);
 
-  const sign = useCallback(async (xdr: string) => {
-    if (!kit || !mod) throw new Error('Wallet not ready.');
-    const { signedTxXdr } = await kit.signTransaction(xdr, {
-      networkPassphrase: mod.WalletNetwork.TESTNET,
-    });
-    return signedTxXdr;
-  }, []);
+  /// Signing, for a wallet that holds a key.
+  ///
+  /// A smart account never comes through here: its calls are signed in the
+  /// page by the session key it granted this app, because its passkey cannot
+  /// authorise a call into another contract at all. See lib/nido/agama.ts.
+  const sign = useCallback(
+    async (xdr: string) => {
+      const kit = await loadKit();
+      const { signedTxXdr } = await kit.signTransaction(xdr, {
+        networkPassphrase: PASSPHRASE,
+        ...(address ? { address } : {}),
+      });
+      return signedTxXdr;
+    },
+    [address],
+  );
 
   const value = useMemo(
     () => ({
       address,
+      smart: !!address && address.startsWith('C'),
       connecting,
       error,
       detected,

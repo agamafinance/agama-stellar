@@ -1,4 +1,6 @@
-import { CORE, ORACLE, POOL, PRODUCT, STOCKS, USDC, VAULT, type Kind, type Stock } from './config';
+import { Asset, StrKey } from '@stellar/stellar-sdk';
+
+import { CORE, ORACLE, PASSPHRASE, POOL, PRODUCT, STOCKS, USDC, VAULT, type Kind, type Stock } from './config';
 import { read } from './rpc';
 import { addr, stellarAsset, unitEnum } from './scval';
 
@@ -54,9 +56,11 @@ export type Snapshot = {
   /// Native XLM, which pays the fees and is the one thing here nobody can
   /// mint for the visitor.
   xlm: string;
-  /// Seconds before each market's faucet gives again, in market order, with
-  /// the dollar last. Zero means ready.
+  /// Seconds before each market's own faucet gives again, in market order,
+  /// with the dollar last. Zero means ready.
   faucetIn: number[];
+  /// Seconds before the one click drip gives this address everything again.
+  dripIn: number;
   /// Blend's borrow rate on USDC, in bps, computed from the reserve the way
   /// the pool computes it.
   borrowRateBps: number;
@@ -126,12 +130,13 @@ export async function readSnapshot(owner?: string): Promise<Snapshot> {
     positionsFor(owner, markets, 'amplify'),
   ]);
 
-  const [usdc, reserve, vaultRate, buffer, faucetIn, xlm] = await Promise.all([
+  const [usdc, reserve, vaultRate, buffer, faucetIn, dripIn, xlm] = await Promise.all([
     owner ? read<bigint>(USDC, 'balance', [addr(owner)]) : Promise.resolve(0n),
     read<ReserveData>(POOL, 'get_reserve', [addr(USDC)]),
     read<bigint>(VAULT, 'rate'),
     read<bigint>(CORE, 'buffer'),
     owner ? read<bigint[]>(CORE, 'faucet_in', [addr(owner)]) : Promise.resolve(null),
+    owner ? read<bigint>(CORE, 'faucet_for_in', [addr(owner)]) : Promise.resolve(0n),
     owner ? nativeBalance(owner) : Promise.resolve(0),
   ]);
 
@@ -145,6 +150,7 @@ export async function readSnapshot(owner?: string): Promise<Snapshot> {
     usdc: (usdc ?? 0n).toString(),
     xlm: String(xlm ?? 0),
     faucetIn: (faucetIn ?? []).map((s) => Number(s)),
+    dripIn: Number(dripIn ?? 0),
     borrowRateBps: rates.borrowBps,
     utilizationBps: rates.utilBps,
     vaultRate: (vaultRate ?? 10n ** 12n).toString(),
@@ -198,9 +204,21 @@ async function positionsFor(
   );
 }
 
+/// The native Stellar Asset Contract, which is where a contract's XLM lives.
+/// Derived rather than pasted in: it is a function of the network.
+const NATIVE_SAC = Asset.native().contractId(PASSPHRASE);
+
 /// XLM is a classic balance, not a contract one, so it comes from Horizon
 /// rather than from a simulation.
+///
+/// Except for a smart account, which has no classic account at all: Horizon
+/// answers 400 for a contract address, and its XLM is a balance inside the
+/// native asset's own contract. Same number, read the only way it can be.
 async function nativeBalance(owner: string): Promise<number> {
+  if (StrKey.isValidContract(owner)) {
+    const held = await read<bigint>(NATIVE_SAC, 'balance', [addr(owner)]);
+    return Number(held ?? 0n) / 1e7;
+  }
   try {
     const r = await fetch(`https://horizon-testnet.stellar.org/accounts/${owner}`, {
       cache: 'no-store',

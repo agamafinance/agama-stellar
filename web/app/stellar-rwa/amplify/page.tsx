@@ -5,12 +5,13 @@ import { useEffect, useState } from 'react';
 import { AGENT_OPS, asset, BPS, DECIMALS } from '@/lib/stellar/config';
 import { useStellarWallet } from '@/lib/stellar/WalletProvider';
 import {
-  ago, errorText, ix, pct, px, qty, send, stockValue, usd, useSnapshot,
+  ago, errorText, ix, pct, px, qty, send, stockValue, usd, useSnapshot, type Call,
 } from '@/lib/stellar/useStellar';
 import {
   AgentsCard, AmountBox, card, Hero, MarketCards, Panel, parseAmount, PriceBadge, primaryBtn,
   Row, secondaryBtn, SessionBadge, Stat, Status, Step, toDecimal,
 } from '@/components/stellar/ui';
+import { NidoGate, useNidoSession } from '@/components/stellar/NidoGate';
 
 export default function StellarAmplifyPage() {
   const { address, connect, sign } = useStellarWallet();
@@ -30,6 +31,7 @@ export default function StellarAmplifyPage() {
 
   const m = snap?.markets[sel];
   const position = snap?.amplify[sel];
+  const session = useNidoSession(m?.stock);
 
   const [amount, setAmount] = useState('');
   const [picked, setPicked] = useState<number>();
@@ -55,23 +57,20 @@ export default function StellarAmplifyPage() {
   const borrow = m ? stockValue(bought, BigInt(m.price)) : 0n;
   const ltvAfter = levBps > 10_000 ? Math.floor(((levBps - 10_000) * 10_000) / levBps) : 0;
 
-  async function run(
-    where: 'open' | 'close',
-    call: { id: string; fn: string; args: Parameters<typeof send>[3] },
-    msg: string,
-  ) {
+  async function run(where: 'open' | 'close', call: Call, msg: string) {
     if (!address) return setStatus({ text: 'Connect a wallet first.', where });
     if (!m) return setStatus({ text: 'Markets are still loading.', where });
     setBusy(true);
     setStatus({ text: msg, where });
     try {
-      const hash = await send(address, call.id, call.fn, call.args, sign, (text) =>
-        setStatus({ text, where }),
-      );
+      const hash = await send(address, call, sign, (text) => setStatus({ text, where }));
       setStatus({ text: 'Done.', hash, where });
       if (where === 'open') setAmount('');
     } catch (e) {
-      setStatus({ text: errorText(e), where });
+      if (e instanceof Error && e.name === 'NeedsSession') {
+        session.refresh();
+        setStatus({ text: 'This needs your approval once. It is just below.', where });
+      } else setStatus({ text: errorText(e), where });
     } finally {
       setBusy(false);
       void refresh();
@@ -121,6 +120,11 @@ export default function StellarAmplifyPage() {
               <h2 className="text-[17px] font-semibold text-fg">Loop {m?.stock.ticker ?? ''}</h2>
               <SessionBadge m={m} />
             </div>
+            {session.smart && !session.ready && (
+              <div className="mt-4">
+                <NidoGate session={session} stock={m?.stock} />
+              </div>
+            )}
             {position ? (
               <p className="mt-4 text-[14px] text-fg-muted">
                 You already have a loop on {m?.stock.ticker}. Close it to open a new one at a different multiple.
@@ -204,6 +208,11 @@ export default function StellarAmplifyPage() {
               </>
             )}
             {!busy && status?.where === 'open' && <Status text={status.text} hash={status.hash} />}
+            {session.smart && session.ready && (
+              <div className="mt-2">
+                <NidoGate session={session} stock={m?.stock} />
+              </div>
+            )}
           </div>
 
           <div className={card}>

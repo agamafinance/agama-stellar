@@ -14,7 +14,7 @@ import { Status, Step } from '@/components/stellar/ui';
 const XLM_FAUCET = 'https://lab.stellar.org/account/fund';
 
 export default function StellarFaucetPage() {
-  const { address, connect, sign } = useStellarWallet();
+  const { address, connect, sign, smart } = useStellarWallet();
   const { snap, refresh } = useSnapshot(address);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; hash?: string }>();
@@ -27,21 +27,19 @@ export default function StellarFaucetPage() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  /// Eleven tokens, one call, one approval.
+  /// Eleven tokens, one call, and nobody signs for the drip.
   ///
-  /// The contract walks every market's faucet and the dollar's, and the one
-  /// signature on the outer transaction covers the whole tree. A token on
-  /// cooldown is skipped rather than fatal, and the call says how many
-  /// actually gave.
+  /// The core is the stocks' admin so it mints them, and the dollar comes out
+  /// of what it holds above its buffer. That matters most for a passkey smart
+  /// account: the signed faucet asks the holder to authorise twelve separate
+  /// contracts, which for such an account is twelve confirmations before
+  /// anything arrives. This asks for none.
   async function claim() {
     if (!address) return connect();
     setBusy(true);
     setStatus({ text: 'Building the transaction...' });
     try {
-      const call = ix.faucet(address);
-      const hash = await send(address, call.id, call.fn, call.args, sign, (text) =>
-        setStatus({ text }),
-      );
+      const hash = await send(address, ix.faucet(address), sign, (text) => setStatus({ text }));
       setStatus({ text: '10,000 USDC and 10 of each stock are in your wallet.', hash });
     } catch (e) {
       setStatus({ text: errorText(e) });
@@ -52,9 +50,12 @@ export default function StellarFaucetPage() {
   }
 
   const xlm = snap && address ? snap.xlm : undefined;
-  const lowOnXlm = xlm !== undefined && Number(xlm) < 100;
-  const waiting = snap?.faucetIn?.filter((s) => s > 0).length ?? 0;
-  const nextIn = snap?.faucetIn?.length ? Math.min(...snap.faucetIn.filter((s) => s > 0)) : 0;
+  // A smart account does not pay its own fees here, so an empty one is not a
+  // problem to warn about.
+  const lowOnXlm = !smart && xlm !== undefined && Number(xlm) < 100;
+  // The drip is one cooldown for the whole claim now, not one per token.
+  const nextIn = snap?.dripIn ?? 0;
+  const waiting = nextIn > 0 ? 11 : 0;
 
   return (
     <>
@@ -93,7 +94,7 @@ export default function StellarFaucetPage() {
             <Stat
               label="XLM"
               value={xlm !== undefined ? Number(xlm).toFixed(3) : '-'}
-              sub="For fees"
+              sub={smart ? 'This app pays your fees' : 'For fees'}
             />
           </div>
         </div>
@@ -103,16 +104,22 @@ export default function StellarFaucetPage() {
         <div className="max-w-[1400px] mx-auto space-y-3">
           <h2 className="mb-2 text-[13px] uppercase tracking-wider text-fg-muted">Get funded</h2>
 
-          <StepRow
-            icon={
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={asset('/stellar-rwa.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
-            }
-            title="XLM for fees"
-            blurb="Stellar testnet transactions are paid in XLM, and opening a position deploys a contract, so it wants rather more than a transfer would. Friendbot hands out 10,000 at a time; it is the one thing here nobody can mint for you."
-          >
-            <FaucetLink href={XLM_FAUCET} label="Open XLM faucet" />
-          </StepRow>
+          {/* A passkey smart account pays no fees of its own: the key this
+              page holds pays them, and Friendbot funds that key. Offering a
+              faucet for an address Friendbot cannot create would be a dead
+              end, so this step is only here for a wallet with a keypair. */}
+          {!smart && (
+            <StepRow
+              icon={
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={asset('/stellar-rwa.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
+              }
+              title="XLM for fees"
+              blurb="Stellar testnet transactions are paid in XLM, and opening a position deploys a contract, so it wants rather more than a transfer would. Friendbot hands out 10,000 at a time; it is the one thing here nobody can mint for you."
+            >
+              <FaucetLink href={XLM_FAUCET} label="Open XLM faucet" />
+            </StepRow>
+          )}
 
           <StepRow
             icon={
@@ -123,7 +130,7 @@ export default function StellarFaucetPage() {
               </div>
             }
             title="USDC, the nine shares and gold"
-            blurb="10,000 USDC, and 10 each of TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Eleven tokens, one call, one approval."
+            blurb="10,000 USDC, and 10 each of TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Eleven tokens, one call, and nothing to approve."
           >
             <MintButton
               onClick={address ? claim : () => connect()}
@@ -142,7 +149,7 @@ export default function StellarFaucetPage() {
             ) : lowOnXlm ? (
               `${Number(xlm).toFixed(2)} XLM here: paste your address into the XLM faucet above first.`
             ) : waiting > 0 ? (
-              `${waiting} of ${snap!.faucetIn.length} are on cooldown, the first is ready in ${Math.ceil(nextIn / 60)} min. The rest still give.`
+              `Claimed already: this address can take the next lot in ${Math.ceil(nextIn / 60)} min.`
             ) : (
               'Everything is ready to claim.'
             )}

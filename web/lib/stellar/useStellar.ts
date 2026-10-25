@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Contract, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Contract, rpc, StrKey, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 
 import { BPS, CORE, PASSPHRASE, RPC, UNIT, type Stock } from './config';
 import { addr, i128, u32 } from './scval';
@@ -102,24 +102,48 @@ export function useSnapshot(owner: string | null) {
   return { snap, error, refresh: load };
 }
 
+/// One call the screens make: which contract, which function, which arguments,
+/// and the market it is about when there is one.
+///
+/// The market is here because a smart account has to approve one rule per
+/// contract a call authorises, and only the call site knows which stock's
+/// token that is.
+export type Call = { id: string; fn: string; args: xdr.ScVal[]; stock?: Stock };
+
 /// Build, simulate, sign, send, wait.
 ///
 /// The simulate step is not an optimisation. A Soroban transaction has to
 /// carry the exact ledger entries it will touch and the resources it will
 /// burn, and only the network can work those out; skipping it produces a
 /// transaction rejected for a reason unrelated to what it was trying to do.
+///
+/// A smart account takes a different road entirely. It cannot be a
+/// transaction's source and its passkey cannot authorise a call into another
+/// contract, so the call is signed in the page by the session key its owner
+/// granted this app. That code is loaded only when a smart account is
+/// connected, which keeps it out of everyone else's bundle.
 export async function send(
   source: string,
-  contractId: string,
-  fn: string,
-  args: xdr.ScVal[],
+  call: Call,
   sign: (xdr: string) => Promise<string>,
   progress?: (text: string) => void,
 ): Promise<string> {
+  if (StrKey.isValidContract(source)) {
+    const { grantsFor, invokeViaSession } = await import('@/lib/nido/agama');
+    return invokeViaSession(
+      source,
+      call.id,
+      call.fn,
+      call.args,
+      grantsFor(call.fn, call.stock),
+      progress,
+    );
+  }
+
   progress?.('Preparing the transaction...');
   const account = await server.getAccount(source);
   const built = new TransactionBuilder(account, { fee: '10000000', networkPassphrase: PASSPHRASE })
-    .addOperation(new Contract(contractId).call(fn, ...args))
+    .addOperation(new Contract(call.id).call(call.fn, ...call.args))
     .setTimeout(180)
     .build();
 
@@ -147,36 +171,54 @@ export async function send(
 }
 
 /// The calls the screens make.
-export const ix = {
-  /// Every market and the dollar, in one call and one signature. The per
-  /// token faucets are still there and still permissionless; this is the one
-  /// the screen uses, because eleven approvals is where people stop.
-  faucet: (user: string) => ({ id: CORE, fn: 'faucet', args: [addr(user)] }),
-  faucetOne: (user: string, s: Stock) => ({ id: s.token, fn: 'faucet', args: [addr(user)] }),
+export const ix: Record<string, (...a: never[]) => Call> & {
+  faucet: (user: string) => Call;
+  faucetOne: (user: string, s: Stock) => Call;
+  earnDeposit: (user: string, s: Stock, amount: bigint, ltvBps: number) => Call;
+  earnSetTarget: (user: string, s: Stock, ltvBps: number) => Call;
+  earnClose: (user: string, s: Stock) => Call;
+  amplifyOpen: (user: string, s: Stock, amount: bigint, ltvBps: number) => Call;
+  amplifyClose: (user: string, s: Stock) => Call;
+} = {
+  /// Every market and the dollar, in one call, and nobody has to sign for the
+  /// drip itself. The core is the stocks' admin so it mints them, and the
+  /// dollar comes out of what it holds above its buffer.
+  ///
+  /// The signed faucet is still there, and so are the per token ones. This is
+  /// the one the screen uses because it is the only one a smart account can
+  /// face: the signed version asks the holder to authorise twelve contracts,
+  /// which for a passkey account is twelve confirmations.
+  faucet: (user: string) => ({ id: CORE, fn: 'faucet_for', args: [addr(user)] }),
+  faucetOne: (user: string, s: Stock) => ({ id: s.token, fn: 'faucet', args: [addr(user)], stock: s }),
   earnDeposit: (user: string, s: Stock, amount: bigint, ltvBps: number) => ({
     id: CORE,
     fn: 'earn_deposit',
     args: [addr(user), addr(s.token), i128(amount), u32(ltvBps)],
+    stock: s,
   }),
   earnSetTarget: (user: string, s: Stock, ltvBps: number) => ({
     id: CORE,
     fn: 'earn_set_target',
     args: [addr(user), addr(s.token), u32(ltvBps)],
+    stock: s,
   }),
   earnClose: (user: string, s: Stock) => ({
     id: CORE,
     fn: 'earn_close',
     args: [addr(user), addr(s.token)],
+    stock: s,
   }),
   amplifyOpen: (user: string, s: Stock, amount: bigint, ltvBps: number) => ({
     id: CORE,
     fn: 'amplify_open',
     args: [addr(user), addr(s.token), i128(amount), u32(ltvBps)],
+    stock: s,
   }),
   amplifyClose: (user: string, s: Stock) => ({
     id: CORE,
     fn: 'amplify_close',
     args: [addr(user), addr(s.token)],
+    stock: s,
   }),
 };
 
@@ -185,6 +227,10 @@ export const ix = {
 /// the source for something the screen already knew.
 export function errorText(raw: unknown): string {
   const s = typeof raw === 'string' ? raw : raw instanceof Error ? raw.message : String(raw);
+  // A smart account's refusals come back as contract errors too, in the
+  // thirty two hundreds, so they are read first: looked up in the table below
+  // they would be reported as the core refusing something.
+  for (const [pattern, text] of ACCOUNT_ERRORS) if (pattern.test(s)) return text;
   const m = s.match(/Error\(Contract, #(\d+)\)/);
   if (m) return CORE_ERRORS[m[1]] ?? `The contract refused this (code ${m[1]}).`;
   if (/Error\(Auth/.test(s)) return 'The wallet did not authorise this.';
@@ -193,17 +239,41 @@ export function errorText(raw: unknown): string {
   return first.length > 150 ? `${first.slice(0, 150)}...` : first;
 }
 
+/// What a Perch smart account says when it refuses, and what Nido's relayer
+/// says when it will not carry something. The account checks its rules during
+/// simulation, so a refusal here cost nothing and sent nothing.
+const ACCOUNT_ERRORS: [RegExp, string][] = [
+  [/#3221/, 'Your account refused this: it would go past the cap you gave this app. Nothing was sent.'],
+  [
+    /#3002|#3016/,
+    'Your account has no live rule for this call, or it expired. Approve the session again.',
+  ],
+  [/#3014/, 'Your account has no rule for one of the contracts this call touches.'],
+  [
+    /#3223/,
+    'One of your rules carries a cap on something that is not a transfer, which the account cannot meter. Approve that rule again and leave it uncapped.',
+  ],
+  [
+    /FEE_LIMIT_EXCEEDED/,
+    'Nido\u2019s free transaction budget is spent for now, so nothing was sent. Try again later.',
+  ],
+  [/POOL_CAPACITY/, 'Nido\u2019s relayer is busy, so nothing was sent. Try again in a minute.'],
+];
+
 const CORE_ERRORS: Record<string, string> = {
   '1': 'Only the admin can do that.',
-  '2': 'That market is not open.',
-  '3': 'The amount has to be above zero.',
-  '4': 'That level is above what this market allows right now.',
-  '5': 'There is no position there.',
-  '6': 'The price is too old to borrow against. The keeper pushes a new one every few minutes.',
-  '7': 'The protocol buffer is empty, so a repayment cannot be made right now.',
-  '8': 'The protocol is paused.',
-  '9': 'That position is healthy, so it cannot be liquidated.',
-  '10': 'A position is already open there.',
+  '2': 'There is no market for that token.',
+  '3': 'That market already exists.',
+  '4': 'That market is not open.',
+  '5': 'The amount has to be above zero.',
+  '6': 'That level is above what this market allows right now.',
+  '7': 'There is no position there.',
+  '8': 'A position is already open there.',
+  '9': 'The price is too old to borrow against. The keeper pushes a new one every few minutes.',
+  '10': 'The protocol buffer is empty, so a repayment cannot be made right now.',
+  '11': 'That position is healthy, so it cannot be liquidated.',
+  '12': 'The protocol is paused.',
+  '13': 'The faucet already served this address. It gives again an hour after the last one.',
 };
 
 // ---- numbers ----
