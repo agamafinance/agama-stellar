@@ -197,8 +197,8 @@ export function NidoGate({ session, stock }: { session: Session; stock?: Stock }
             ))}
           </ul>
           <p className="mt-3 text-[12px] text-[#b4571f]">
-            Nido asks for a spending cap on each rule. The one that moves {stock.ticker} has its cap
-            already. On the other, choose &ldquo;let this key spend without any cap&rdquo;: the protocol
+            Nido asks for a spending cap on each rule. The one that moves {stock.ticker}{' '}
+            has its cap already. On the other, choose &ldquo;let this key spend without any cap&rdquo;: the protocol
             rule moves nothing itself, and a cap on a call that is not a transfer is refused later with
             nothing to show for it.
           </p>

@@ -62,6 +62,8 @@ export async function open({ dir, headed = false } = {}) {
     chrome,
     [
       ...(headed ? [] : ['--headless=new']),
+      // Big enough that a screenshot shows a card rather than a slice of one.
+      '--window-size=1400,1700',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
       '--no-first-run',
@@ -303,7 +305,11 @@ function note(method, params) {
       return this;
     },
     async shot(file) {
-      const { data } = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
+      const { data } = await send(
+        'Page.captureScreenshot',
+        { format: 'png', captureBeyondViewport: true },
+        sessionId,
+      );
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, Buffer.from(data, 'base64'));
       log('shot', file);
