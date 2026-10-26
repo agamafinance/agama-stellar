@@ -21,6 +21,8 @@ negotiable: it is what the signature covers.
 """
 
 import json
+import os
+import urllib.error
 import urllib.request
 
 from eth_keys import keys
@@ -35,17 +37,56 @@ DECIMALS = 8
 VALUE_BYTES = 32
 MARKER = bytes.fromhex("000002ed57011e0000")
 
+# RedStone is switching its public gateways off. Since 2026-10-26 they answer
+# 403 `public_gateway_rejected` inside windows that grow every day, and from
+# 2026-10-29 they stop serving for good. An authenticated gateway takes their
+# place: a host and a key RedStone issues, which no public host accepts.
+#
+# So the gateway list is configuration now, not a constant. Set both and this
+# keeper goes on exactly as before:
+#
+#     REDSTONE_GATEWAY=https://<your-gateway>  REDSTONE_API_KEY=<key>
+#
+# The key goes in the header RedStone's own SDK sends; the query parameter is
+# there because some of their deployments read it from there instead, and
+# sending both costs nothing.
+GATEWAY_ENV = "REDSTONE_GATEWAY"
+KEY_ENV = "REDSTONE_API_KEY"
+PUBLIC_OFF = (
+    "RedStone's public gateways are closed (403 public_gateway_rejected). They stop for "
+    f"good on 2026-10-29. Set {GATEWAY_ENV} and {KEY_ENV} to an authenticated gateway, or "
+    "price the markets by hand with ./scripts/deploy.sh prices."
+)
+
+
+def gateways():
+    """Where to ask, authenticated one first when there is one."""
+    private = os.environ.get(GATEWAY_ENV)
+    return [private.rstrip("/")] + GATEWAYS if private else list(GATEWAYS)
+
 
 def fetch(service=SERVICE, timeout=30):
     """The latest packages for every feed, from whichever gateway answers."""
+    key = os.environ.get(KEY_ENV)
     last = None
-    for base in GATEWAYS:
+    rejected = False
+    for base in gateways():
         url = f"{base}/data-packages/latest/{service}"
+        if key:
+            url += f"?apiKey={key}"
+        request = urllib.request.Request(url)
+        if key:
+            request.add_header("x-api-key", key)
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as r:
+            with urllib.request.urlopen(request, timeout=timeout) as r:
                 return json.load(r)
+        except urllib.error.HTTPError as e:  # noqa: PERF203 - one per gateway
+            last = e
+            rejected = rejected or e.code == 403
         except Exception as e:  # noqa: BLE001 - any failure means try the next
             last = e
+    if rejected and not key:
+        raise RuntimeError(PUBLIC_OFF)
     raise RuntimeError(f"no gateway answered: {last}")
 
 

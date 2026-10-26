@@ -242,6 +242,13 @@ mints that, so without dollars nothing can be supplied, borrowed or buffered.
 protocol is built around: a deposit lands immediately, and a withdrawal does
 NOT pay out, it queues.
 
+**A price feed with a deadline.** RedStone is switching its public gateways off: since 26 October 2026
+they answer `403 public_gateway_rejected` inside windows that grow every day, and from 29 October they
+stop for good. An authenticated gateway replaces them, which is a host and a key RedStone issues, and no
+public host accepts a key. The keeper reads `REDSTONE_GATEWAY` and `REDSTONE_API_KEY` and goes on exactly
+as before once both are set; without them it says so rather than guessing, and `./scripts/deploy.sh prices`
+is the manual fallback. The same deadline applies to the X Layer build, which reads the same gateway.
+
 **Two admin-priced markets.** RedStone carries SPY only as `SPY---PRE_AFTER`
 and BENJI as `BENJI_ETHEREUM_FUNDAMENTAL`, and the deployed oracle was bound
 to `SPY` and `BENJI` before that was known. `retarget_feed` exists in the

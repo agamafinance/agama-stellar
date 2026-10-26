@@ -90,15 +90,19 @@ else
 fi
 
 say "6. The app"
-for path in "/stellar" "/stellar/amplify" "/stellar/portfolio" "/stellar/faucet" "/api/snapshot"; do
+for path in "/stellar-rwa" "/stellar-rwa/amplify" "/stellar-rwa/portfolio" "/stellar-rwa/faucet" \
+            "/stellar-rwa/api/snapshot"; do
   code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3010$path")
   if [ "$code" = "200" ]; then ok "$path"; else bad "$path returned $code"; fi
 done
-N=$(curl -s http://localhost:3010/api/snapshot | python3 -I -c "
+N=$(curl -s http://localhost:3010/stellar-rwa/api/snapshot | python3 -I -c "
 import json,sys
 d=json.load(sys.stdin)
 print(sum(1 for m in d['markets'] if int(m['price']) > 0 and m['fresh']))")
 if [ "$N" = "10" ]; then ok "all 10 markets priced and fresh through the app"; else bad "only $N priced"; fi
+
+# The passkey account's whole path is its own script, because it needs a
+# browser and Nido's relayer: node scripts/nido/e2e.mjs.
 
 say "Result"
 printf '  %d passed, %d failed\n' "$PASS" "$FAIL"
