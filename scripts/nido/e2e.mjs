@@ -139,11 +139,21 @@ try {
   step('A deposit, signed with the passkey at the moment it is made');
   await p.goto(APP);
   await p.settle(3000);
+  // Wait for the snapshot the balances come with: the deposit button reads
+  // "Not enough TSLAx" until it has arrived, and a market card cannot be
+  // picked before the cards are there at all.
+  await p.waitForText(['held'], { timeout: 90_000 });
   await p.click('TSLAx');
   await p.fill('input[placeholder="0.00"]', DEPOSIT);
-  await p.settle(500);
+  await p.waitForText(['Deposit and start earning'], { timeout: 60_000 });
   await p.click('Deposit and start earning');
+  // Where the page was when the button was pressed. The ceremony is a whole
+  // navigation, so coming back at the top would put the result off screen.
+  const was = Number(await p.eval('Math.round(window.scrollY)'));
   await walkGrants(p);
+  const now = Number(await p.eval('Math.round(window.scrollY)'));
+  console.log(`scroll     left at ${was}, came back at ${now}`);
+  if (was > 100 && Math.abs(now - was) > 80) throw new Error('the page came back somewhere else');
   console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
   const live = (await rules(account)).filter((r) => r.name.startsWith('agama'));
   console.log('rules now:', live.map((r) => `${r.name} (${r.policies.length} policies)`).join(', '));
@@ -183,9 +193,10 @@ try {
   step('Amplify, the other product, one passkey each way');
   await p.goto(`${APP}/amplify`);
   await p.settle(3000);
+  await p.waitForText(['held'], { timeout: 90_000 });
   await p.click('TSLAx');
   await p.fill('input[placeholder="0.00"]', DEPOSIT);
-  await p.settle(500);
+  await p.waitForText(['Amplify '], { timeout: 60_000 });
   await p.click('Amplify ');
   await walkGrants(p);
   console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
@@ -213,6 +224,7 @@ try {
 } catch (error) {
   failed = error;
   console.error(`\nfailed after ${steps.length} steps: ${error.message}`);
+  for (const [id] of browser.pages) await browser.page(id).shot(`${SHOTS}/failed-${id.slice(0, 6)}.png`).catch(() => {});
   for (const [, pg] of browser.pages) if (pg.log?.length) console.error(pg.log.slice(-6).join('\n'));
 } finally {
   if (!HEADED || failed) await browser.close();
