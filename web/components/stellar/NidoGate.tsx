@@ -95,6 +95,23 @@ export function useNidoSession(stock?: Stock): Session {
   return { status, smart, note, busy, check, forget, refresh };
 }
 
+/// Put the page back where the owner left it.
+///
+/// The ceremony is a whole page navigation, so the browser brings them back at
+/// the top while the thing they were doing is halfway down, and the result
+/// lands off screen. The page is also too short to scroll at that moment,
+/// because the snapshot has not arrived yet, so this keeps asking until the
+/// page is tall enough to answer and stops as soon as it does.
+function restoreScroll(y?: number) {
+  if (!y) return;
+  const until = Date.now() + 5000;
+  const tick = () => {
+    window.scrollTo(0, y);
+    if (Math.abs(window.scrollY - y) > 2 && Date.now() < until) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 /// Run the action the owner just signed for.
 ///
 /// Called once per page load. Nido's answer arrives in the address bar; when
@@ -117,6 +134,7 @@ export function useNidoReturn(run: (armed: Armed) => void) {
       if (answer.outcome === 'next-grant') return;
       const armed = n.takeArmed();
       if (answer.outcome === 'approved' && armed && armed.account === address) {
+        restoreScroll(armed.scroll);
         latest.current(armed);
       }
     })();
@@ -126,16 +144,11 @@ export function useNidoReturn(run: (armed: Armed) => void) {
   }, [address, smart]);
 }
 
-const hours = (ms: number) => Math.max(0, Math.round((ms - Date.now()) / 3_600_000));
-
 /// The line a smart account sees under the button it is about to press, and
 /// the one place a refused ceremony is explained.
 export function NidoGate({ session }: { session: Session; stock?: Stock }) {
-  const { status, smart, note, busy, check, forget } = session;
+  const { status, smart, note, busy, check } = session;
   if (!smart) return null;
-
-  const waiting = status?.state === 'waiting';
-  const live = status?.state === 'ready' ? hours(status.expiresAt) : undefined;
 
   return (
     <div className="mt-2 space-y-1">
@@ -144,7 +157,7 @@ export function NidoGate({ session }: { session: Session; stock?: Stock }) {
         itself, so what you confirm is the rule that lets this page make the call, renewed each time
         and checked on chain by your account.
       </p>
-      {waiting && (
+      {status?.state === 'waiting' && (
         <p className="text-[12px] text-[#b4571f]">
           Nido has not confirmed the last rule. Your account&apos;s own rules are the truth, so read them
           rather than guess.{' '}
@@ -154,28 +167,6 @@ export function NidoGate({ session }: { session: Session; stock?: Stock }) {
         </p>
       )}
       {note && <p className="text-[12px] text-fg-muted">{note}</p>}
-      {live !== undefined && live > 0 && (
-        <p className="text-[11px] text-fg-muted">
-          The rules you have signed run out in {live}h on their own.{' '}
-          <button type="button" onClick={forget} className="underline hover:text-fg">
-            Forget this browser&apos;s key
-          </button>
-        </p>
-      )}
     </div>
-  );
-}
-
-/// What Nido's own page will ask for, said before the owner gets there.
-export function NidoCapNote({ stock }: { stock?: Stock }) {
-  const { smart } = useStellarWallet();
-  if (!smart) return null;
-  return (
-    <p className="mt-2 text-[11px] text-[#b4571f]">
-      Nido offers a spending cap on every rule. The one that moves{' '}
-      {stock?.ticker ?? 'your stock'} comes with its cap filled in. On the protocol&apos;s own rule, choose &ldquo;let this key spend without
-      any cap&rdquo;: it moves nothing itself, and a cap on a call that is not a transfer is refused
-      later with nothing to show for it.
-    </p>
   );
 }

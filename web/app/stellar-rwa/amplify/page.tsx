@@ -11,7 +11,7 @@ import {
   AgentsCard, AmountBox, card, Hero, MarketCards, Panel, parseAmount, PriceBadge, primaryBtn,
   Row, secondaryBtn, SessionBadge, Stat, Status, Step, toDecimal,
 } from '@/components/stellar/ui';
-import { NidoCapNote, NidoGate, useNidoReturn, useNidoSession } from '@/components/stellar/NidoGate';
+import { NidoGate, useNidoReturn, useNidoSession } from '@/components/stellar/NidoGate';
 
 export default function StellarAmplifyPage() {
   const { address, connect, sign } = useStellarWallet();
@@ -220,7 +220,6 @@ export default function StellarAmplifyPage() {
             )}
             {!busy && status?.where === 'open' && <Status text={status.text} hash={status.hash} />}
             <NidoGate session={session} />
-            <NidoCapNote stock={m?.stock} />
           </div>
 
           <div className={card}>

@@ -140,6 +140,9 @@ export type Armed = {
   /// Base units, as a string, because this goes through JSON.
   amount?: string;
   ltv?: number;
+  /// Where the page was when the owner pressed the button, so they come back
+  /// to it rather than to the top.
+  scroll?: number;
 };
 
 const ARMED = 'agama-stellar:nido-armed';
@@ -165,7 +168,7 @@ export const dropArmed = () => localStorage.removeItem(ARMED);
 /// Send the owner to Nido to sign this action, and remember what it was.
 /// Navigates away: nothing after this runs.
 export function signFor(account: string, fn: string, stock: Stock | undefined, armed: Armed) {
-  arm(armed);
+  arm({ scroll: Math.round(window.scrollY), ...armed });
   return requestSession({
     account,
     grants: grantsToSign(account, fn, stock),
