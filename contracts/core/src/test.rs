@@ -71,6 +71,7 @@ mod mock_pool {
     enum K {
         Index(Address),
         Pos(Address),
+        DRate,
     }
 
     #[contract]
@@ -80,6 +81,14 @@ mod mock_pool {
     impl MockPool {
         pub fn register(e: Env, asset: Address, index: u32) {
             e.storage().instance().set(&K::Index(asset), &index);
+        }
+
+        /// Let a debt grow, the way one does between two ledgers. Blend
+        /// carries interest in the reserve's d_rate rather than in the
+        /// borrower's token count, and everything that reads a debt here
+        /// multiplies by it.
+        pub fn accrue(e: Env, d_rate: i128) {
+            e.storage().instance().set(&K::DRate, &d_rate);
         }
 
         pub fn submit(
@@ -109,10 +118,20 @@ mod mock_pool {
                         p.liabilities.set(ix, p.liabilities.get(ix).unwrap_or(0) + r.amount);
                     }
                     5 => {
-                        // Blend takes more than is owed and returns the rest.
+                        // Blend pulls exactly what the request named and
+                        // refunds the excess (apply_repay: the spender
+                        // transfer is request.amount, the pool transfer is
+                        // the difference). That order matters here: the
+                        // position authorises one amount for the pull, so a
+                        // mock that quietly pulled less would fail the auth
+                        // check rather than the repayment, and only when a
+                        // debt had accrued past the repayment.
                         let owed = p.liabilities.get(ix).unwrap_or(0);
                         let paid = if r.amount > owed { owed } else { r.amount };
-                        t.transfer(&from, &me, &paid);
+                        t.transfer(&from, &me, &r.amount);
+                        if r.amount > paid {
+                            t.transfer(&me, &from, &(r.amount - paid));
+                        }
                         p.liabilities.set(ix, owed - paid);
                     }
                     _ => panic!("unexpected request type"),
@@ -152,7 +171,11 @@ mod mock_pool {
                     b_rate: 1_000_000_000_000,
                     b_supply: 0,
                     backstop_credit: 0,
-                    d_rate: 1_000_000_000_000,
+                    d_rate: e
+                        .storage()
+                        .instance()
+                        .get(&K::DRate)
+                        .unwrap_or(1_000_000_000_000),
                     d_supply: 0,
                     ir_mod: 0,
                     last_time: 0,
@@ -168,7 +191,16 @@ mod mock_pool {
 /// mock paid instantly, every test about the buffer would pass for the wrong
 /// reason.
 mod mock_vault {
-    use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+    use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+
+    /// The real vault's codes, because a mock that cannot refuse is a mock
+    /// that proves the chain will not: this one is #3 there too.
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+    #[repr(u32)]
+    pub enum Error {
+        NotEnoughShares = 3,
+    }
 
     #[contracttype]
     enum K {
@@ -195,10 +227,22 @@ mod mock_vault {
             e.storage().instance().set(&K::Deposited(from), &(d + amount));
             amount
         }
-        pub fn request_withdrawal(e: Env, from: Address, amount: i128) -> u64 {
+        pub fn request_withdrawal(e: Env, from: Address, amount: i128) -> Result<u64, Error> {
+            // The real vault burns shares to queue, so it refuses a request
+            // for more than the depositor holds. Letting that through here is
+            // how a close that cannot happen on chain passes in a test.
+            if amount > Self::assets_of(e.clone(), from.clone()) {
+                return Err(Error::NotEnoughShares);
+            }
             let q: i128 = e.storage().instance().get(&K::Queued(from.clone())).unwrap_or(0);
             e.storage().instance().set(&K::Queued(from), &(q + amount));
-            1
+            Ok(1)
+        }
+        /// What the depositor could still ask for.
+        pub fn assets_of(e: Env, of: Address) -> i128 {
+            let d: i128 = e.storage().instance().get(&K::Deposited(of.clone())).unwrap_or(0);
+            let q: i128 = e.storage().instance().get(&K::Queued(of)).unwrap_or(0);
+            d - q
         }
         pub fn deposited(e: Env, who: Address) -> i128 {
             e.storage().instance().get(&K::Deposited(who)).unwrap_or(0)
@@ -840,4 +884,30 @@ fn a_dollar_the_core_cannot_cover_does_not_cost_the_visitor_their_stock() {
     assert_eq!(stock.balance(&second), stock.drip());
     assert_eq!(dollar.balance(&second), 0);
     assert_eq!(dollar.balance(&c.address), c.buffer());
+}
+
+#[test]
+fn a_position_can_be_closed_the_minute_it_is_opened() {
+    let f = setup();
+    let id = f.c.earn_deposit(&f.user, &f.stock.address, &10_0000000, &LTV);
+    let p = pos_client(&f, &id);
+    let in_vault = f.vault.deposited(&id);
+
+    // A minute of interest, which is all it takes. The debt grows in the
+    // pool's d_rate and the vault's share price does not follow it, so the
+    // position now owes more than its vault balance is worth. A close repays
+    // the debt out of the buffer and files the refund against the vault: ask
+    // for the whole debt and the vault refuses, because the shares to burn
+    // are not there. That refusal used to be the end of the position.
+    f.pool.accrue(&1_000_010_000_000);
+    let owed = p.debt();
+    assert!(owed > in_vault, "the debt has to have outgrown the deposit");
+
+    let back = f.c.earn_close(&f.user, &f.stock.address);
+    assert_eq!(back, 10_0000000);
+    assert_eq!(p.debt(), 0);
+    // The request is for what the position holds, and the difference is the
+    // buffer's to carry: it repaid a debt that the vault cannot fully return.
+    assert_eq!(f.vault.queued(&id), in_vault);
+    assert_eq!(f.stock.balance(&f.user), 100_0000000);
 }

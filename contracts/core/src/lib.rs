@@ -861,8 +861,26 @@ impl Core {
         token::Client::new(e, &usdc).transfer(&e.current_contract_address(), &p.address, &amount);
         p.repay(&amount);
 
+        // The refund is asked for against what the position actually holds in
+        // the vault, which is not the same number as what it owed. A debt
+        // grows in Blend's d_rate by the second; the vault's share price does
+        // not follow it. So a position that put exactly its borrowing into the
+        // vault is worth slightly less than its debt a minute later, and the
+        // vault refuses a withdrawal of more shares than are there (#3). Asked
+        // for the whole debt, a position could not be closed at all, which is
+        // a worse answer than the protocol carrying the difference: the buffer
+        // repaid a debt the vault cannot fully return, and that is what a
+        // buffer is for.
         let vault: Address = e.storage().instance().get(&Key::Vault).unwrap();
-        p.vault_request(&vault, &amount);
+        let have = e.invoke_contract::<i128>(
+            &vault,
+            &Symbol::new(e, "assets_of"),
+            Vec::from_array(e, [p.address.into_val(e)]),
+        );
+        let ask = if amount < have { amount } else { have };
+        if ask > 0 {
+            p.vault_request(&vault, &ask);
+        }
         Ok(())
     }
 
