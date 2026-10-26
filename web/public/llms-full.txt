@@ -1,6 +1,6 @@
 # Agama on Stellar: the full dossier
 
-Deposit a tokenized stock, get more of it back. Live on Stellar testnet at https://app.agama.finance,
+Deposit a tokenized stock, get more of it back. Live on Stellar testnet at https://app.agama.finance/stellar-rwa,
 code at https://github.com/agamafinance/agama-stellar.
 
 ## The problem

@@ -124,7 +124,7 @@ export default function StellarPortfolioPage() {
                 <p className="rounded-2xl bg-[#fdfaf1] px-5 py-4 text-[14px] text-fg-muted shadow-[0_1px_3px_rgba(20,50,35,0.06)]">
                   No position yet. Get test tokens on the{' '}
                   <Link href="/stellar-rwa/faucet" className="underline underline-offset-2">Faucet</Link>, then deposit a
-                  stock on <Link href="/" className="underline underline-offset-2">Earn</Link> and the agents
+                  stock on <Link href="/stellar-rwa" className="underline underline-offset-2">Earn</Link> and the agents
                   take it from there.
                 </p>
               )}

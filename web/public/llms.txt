@@ -8,7 +8,7 @@ No tokenized equity exists on Stellar yet, DTCC's is coming, so the shares, gold
 
 ## Try it
 
-- [Earn](https://app.agama.finance/): deposit a stock, pick the level the agents hold, the vault yield becomes more stock
+- [Earn](https://app.agama.finance/stellar-rwa): deposit a stock, pick the level the agents hold, the vault yield becomes more stock
 - [Amplify](https://app.agama.finance/stellar-rwa/amplify): deposit a stock and hold a multiple of it, capped at 1/(1-LTV), which is 3.33x at 70%
 - [Portfolio](https://app.agama.finance/stellar-rwa/portfolio): every position, and what the agents last did to each
 - [Faucet](https://app.agama.finance/stellar-rwa/faucet): 10,000 USDC and 10 of each of the ten markets, in one call

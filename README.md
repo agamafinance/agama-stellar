@@ -1,6 +1,6 @@
 # Agama: tokenized stocks that grow, on Stellar
 
-**[app.agama.finance](https://app.agama.finance)** · Stellar testnet · [llms.txt](https://app.agama.finance/llms.txt)
+**[app.agama.finance/stellar-rwa](https://app.agama.finance/stellar-rwa)** · Stellar testnet · [llms.txt](https://app.agama.finance/llms.txt)
 
 A holder of a tokenized share can only hold it. Agama turns it into a position
 that grows: deposit the stock, the protocol borrows USDC against it in a Blend
@@ -52,7 +52,7 @@ without a fingerprint.
 
 ## Try it in a minute
 
-1. Open **[app.agama.finance](https://app.agama.finance)**, press Connect and
+1. Open **[app.agama.finance/stellar-rwa](https://app.agama.finance/stellar-rwa)**, press Connect and
    choose **Nido**. No extension. If you have no account, make one at
    [test.nido.fyi](https://test.nido.fyi): one passkey, thirty seconds.
 2. **Faucet**: 10,000 USDC and 10 of each of the ten markets, one call, and
@@ -344,7 +344,7 @@ account on chain, and the owner confirms every action with a fingerprint.
 contracts/      core, position, oracle, vault, stock (Rust, soroban-sdk 23)
 keeper/         RedStone payloads rebuilt and verified, prices pushed, agents run
 scripts/        deploy, our own Blend instance, e2e per product, verify, nido/
-web/            the app, Next.js, served at app.agama.finance
+web/            the app, Next.js, served at app.agama.finance/stellar-rwa
 deployments/    what is live, and the two passes this repository abandoned
 vendor/         Blend wasm, read for its interface and never deployed
 ```

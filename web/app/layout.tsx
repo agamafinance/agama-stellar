@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
-    url: 'https://app.agama.finance',
+    url: 'https://app.agama.finance/stellar-rwa',
     siteName: 'Agama',
     title: 'Agama on Stellar: deposit the stock, get more stock',
     description:
