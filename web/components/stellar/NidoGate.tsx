@@ -172,8 +172,8 @@ export function NidoCapNote({ stock }: { stock?: Stock }) {
   if (!smart) return null;
   return (
     <p className="mt-2 text-[11px] text-[#b4571f]">
-      Nido offers a spending cap on every rule. The one that moves {stock?.ticker ?? 'your stock'} comes
-      with its cap filled in. On the protocol&apos;s own rule, choose &ldquo;let this key spend without
+      Nido offers a spending cap on every rule. The one that moves{' '}
+      {stock?.ticker ?? 'your stock'} comes with its cap filled in. On the protocol&apos;s own rule, choose &ldquo;let this key spend without
       any cap&rdquo;: it moves nothing itself, and a cap on a call that is not a transfer is refused
       later with nothing to show for it.
     </p>

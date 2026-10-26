@@ -138,7 +138,7 @@ export default function StellarFaucetPage() {
               </div>
             }
             title="USDC, the nine shares and gold"
-            blurb="10,000 USDC, and 10 each of TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Eleven tokens, one call, and nothing to approve."
+            blurb="10,000 USDC, and 10 each of TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Eleven tokens, one call, one signature."
           >
             <MintButton
               onClick={address ? () => claim() : () => connect()}
