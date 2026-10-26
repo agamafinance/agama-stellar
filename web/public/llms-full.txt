@@ -1,0 +1,147 @@
+# Agama on Stellar: the full dossier
+
+Deposit a tokenized stock, get more of it back. Live on Stellar testnet at https://app.agama.finance,
+code at https://github.com/agamafinance/agama-stellar.
+
+## The problem
+
+A holder of a tokenized share can only hold it. There is no productive use for it on chain: no
+yield, no credit, nothing but custody with extra steps. The obvious answer, lend against it, is the
+one that takes the share away: a lending market sells the collateral the moment the price falls, and
+the share is what the holder came for.
+
+## What Agama does
+
+Two products, both built on the same position.
+
+**Earn.** Deposit a stock and keep it. A share of its value is borrowed against it on Blend at the
+level the user picks, and those dollars go to work in a private-credit vault. Permissionless agents
+hold that level as the price moves: a rise borrows more into the vault, and a fall is repaid out of
+the protocol's own buffer, in the same transaction that notices it, so no stock is ever sold. The
+vault yield above the debt is bought back as more of the stock, so what grows is the share count.
+
+**Amplify.** Deposit a stock and hold a multiple of it. The protocol borrows against the deposit,
+buys more of the same stock and pledges that too. A multiple of L carries an LTV of (L-1)/L, so the
+market's own ceiling caps it at 1/(1-ltv), which is 3.33x at a 70% market. Agents hold the multiple,
+buying when it rises and selling only what repays when it falls, with the sale sized to the debt
+rather than to the position, so what goes back is the stock the loan bought and never the deposit.
+
+**The buffer is the part of the design that is not free.** The vault does not pay out on demand: a
+withdrawal is a request in a FIFO queue, which is the honest behaviour of a credit book, because the
+money is lent out. That collides with the one promise the product makes, so the core keeps a USDC
+buffer: a fall is repaid from it immediately and a withdrawal request refills it behind the user
+rather than in front of them. `buffer()` is public so anyone can see how much is left.
+
+## How it is built
+
+Five Soroban contracts in Rust, 75 tests:
+
+- **core**: the markets, both products, the buffer, and the three agents (rebalance, compound,
+  liquidate). The only contract that knows what healthy means.
+- **position**: one contract per (owner, market, product). It is Blend's borrower of record, which
+  is what keeps one user's trouble off another user's position.
+- **oracle**: SEP-40, with RedStone payload parsing and signature verification on chain. Three
+  independent signers minimum, a maximum age, and a maximum move per update.
+- **vault**: the testnet stand-in for the Agama credit vault, carrying the two properties the
+  protocol is built around: a deposit lands immediately, a withdrawal queues.
+- **stock**: a SEP-41 stand-in share with a public faucet that mints a fixed quantity on a cooldown,
+  because a faucet that takes an amount is a mint function with a friendly name.
+
+Around them: a Python keeper that rebuilds RedStone payloads byte for byte and verifies its own work
+by recovering each signer locally before sending; a Next.js app forked from the production front, so
+Stellar sits beside the other networks rather than beside a demo; and scripts that deploy, verify and
+replay both products end to end on chain.
+
+## What testnet forced, which mainnet would not have
+
+**Our own instance of Blend.** A pool lets nobody borrow until its backstop is funded, a backstop is
+funded in BLND:USDC Comet LP, and on testnet neither token is mintable by anyone but its admin.
+Blend's shared instance is permanently supply-only for us. So Blend's own contracts are deployed by
+us, unmodified: same wasm, same request codes, same interest model. Learning its arithmetic cost
+real time: the backstop threshold is balance_blnd^4 * balance_usdc >= 1e25 (our first attempt landed
+at 1.99e24), Comet refuses a one-sided deposit above 30% of the balance it holds (ErrMaxInRatio, 17),
+and a reserve queued against a pool that is already live is timelocked for a week (InitNotUnlocked,
+1203), which froze one pool's asset list around tokens we had already abandoned and cost us the pool.
+
+**A stand-in vault.** The live Agama vault takes Circle's USDC and nobody but Circle mints that.
+
+**Two admin-priced markets.** RedStone carries SPY only as SPY---PRE_AFTER and BENJI as
+BENJI_ETHEREUM_FUNDAMENTAL, and the deployed oracle was bound to SPY and BENJI before that was known.
+
+## The walls, and what each one taught
+
+**Soroban's authorization is exactly one frame deep.** A contract authorizes the call it makes
+itself and nothing below it, so a pool pulling tokens two frames down fails with
+Error(Auth, InvalidAction) and no hint as to which frame. Positions build InvokerContractAuthEntry
+trees with authorize_as_current_contract for every pull they are responsible for. The other half of
+the same rule: a call a contract must authorize has to be made by that contract, which is why the
+positions, not the core, talk to the vault.
+
+**The leveraged product did not fit in a transaction.** Run literally, the Amplify loop exceeds
+Soroban's CPU budget and still converges from below: eight passes reach 3.14x of the 3.33x on offer,
+in sixteen calls into the pool. It is settled in one step instead: advance the whole multiple, pledge
+it, borrow against the full position and keep the dollars as payment. Identical to the loop's limit,
+exactly rather than approximately, in two pool calls.
+
+**Health is checked per request, not per transaction.** Tests green, chain answering InvalidHf
+(1205): Blend evaluates each request in a submit as it applies it. Pledge before borrowing, repay
+before withdrawing. The mock that let it pass checked nothing, which is the real lesson: a mock that
+cannot refuse proves nothing about a chain that can.
+
+**A passkey account cannot sign a call into your contract.** Nido smart accounts are in the wallet
+picker. A Perch account's passkey signs only under its own admin rule, scoped to the account itself,
+so a call into the protocol comes back #3014 or #3002, by design. Acting for one means session keys:
+the owner approves a Perch rule naming a key the app holds as a delegated signer on one contract, for
+one list of functions, under a cap only a transfer can carry (#3223 otherwise, and an uncapped rule
+allows no token function at all). One rule per contract in the call's authorization tree.
+
+**A wallet forced a protocol change.** The one-click faucet made a single signature cover eleven
+token faucets, each checking it on the way down. For a passkey account that is twelve confirmations
+before anything arrives, so the core now mints the drip itself and asks nobody to authorize anything.
+
+**And a bug only a passkey found.** Closing a position the minute it was opened was impossible: the
+close repays from the buffer and files the refund against the position's vault balance, but a debt
+grows in Blend's d_rate by the second while a vault share price does not follow it. The vault refused
+to burn shares that were not there (#3), 213 stroops short on the position that found it. The request
+is now for what the position holds and the buffer carries the difference.
+
+**RedStone closed its public gateways mid-build.** 403 inside windows that grow every day, nothing at
+all from 29 October 2026. The keeper takes an authenticated gateway through configuration now, and
+when it has none it says what happened and what to do.
+
+## Signing for a passkey account, in practice
+
+Every action renews the rule it needs with the passkey and runs under it a second later: one
+confirmation per action, which is what a signature per action means for an account of this kind. The
+alternative, approving once and then acting silently for a day, is the same rules with nobody
+watching them being used. The ceremony is a page navigation, so the action is armed in localStorage
+and run on the way back, once, and the page comes back where it was left.
+
+Verified end to end against the real network and the real Nido, with a Chrome virtual authenticator
+answering the passkey: an account made, connected, funded, granted, a deposit of 5 TSLAx at 56% LTV,
+a close that hands all ten back, an Amplify that holds 14.9 TSLAx on a deposit of 5, and an unwind.
+Five ceremonies, five calls, five minutes, no fingerprint. `node scripts/nido/e2e.mjs`.
+
+## Verifying any of this
+
+    ./scripts/verify.sh            everything, in one pass, 19 checks
+    cargo test                     the contracts, 75 tests
+    ./scripts/e2e.sh               an Earn, start to finish, on chain
+    ./scripts/amplify-e2e.sh       an Amplify, the same
+    node scripts/nido/e2e.mjs      the same, for a passkey smart account
+    python3 keeper/run.py once     relay prices, then let the agents act
+
+## Addresses, Stellar testnet
+
+    core     CBT6PZFSMT7D6K7L25QRFXACF7U5EHZA7II7KIOR7FREF3XB2SAZYAFD
+    oracle   CBTNXB4KM4UKW25Z6UF22FOABSYS6AFJP34Y4DXBCLIQNYVPK255PJ6M
+    vault    CCVVFPL5ZUTBEKJYS4AGRPFHLOO42TPTUMACHXBQPUW3YTZ23AIAE5GF
+    pool     CCNJ6D3ITLT22QCVNTD3AVEY4ANE3FYXSKIQTLFXTLPOSPWLWWTPHCCG
+    USDC     CD5IKHINGOCVAOZPWD4R5R7FVAAZBCZOVQJVGIGI7XMYESK3CVGUVDSL
+    TSLAx    CAH4TV2YO3SQ4KEVEQEUKFDDHHDCVDWBGLBGXFF6C5ZPYF7HH5GXVE4Y
+
+Ten markets: TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Every one
+carries the same 7000 bps of LTV, and that is the design rather than a shortcut: what backs the loan
+is not the share's calm, it is the position's own counterweight, and that is the same on Tesla as on
+a money fund. What is left of the share's volatility is the part the agents cannot outrun, the gap
+when the session is shut, which is what the off-hours buffer is for.
