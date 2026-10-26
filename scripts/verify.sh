@@ -79,6 +79,11 @@ if python3 keeper/run.py prices >/tmp/agama-prices.log 2>&1; then
   SIGNED=$(grep -c "signed" /tmp/agama-prices.log)
   ok "$SIGNED feeds pushed from signed RedStone reports"
   grep "feed(s) signed" /tmp/agama-prices.log | sed 's/^/  /'
+elif grep -q "public gateways are closed" /tmp/agama-prices.log; then
+  # Not this repository's bug, and not a pass either: RedStone switched its
+  # public gateways off, and nothing signed arrives until this deployment has
+  # a key. keeper/fallback_prices.py keeps the markets priced meanwhile.
+  bad "RedStone's public gateway is shut: set REDSTONE_GATEWAY and REDSTONE_API_KEY"
 else
   bad "pushing prices failed"
 fi
