@@ -174,7 +174,7 @@ export default function StellarFaucetPage() {
           {!busy && <Status text={status?.text} hash={status?.hash} />}
           <NidoGate session={session} />
 
-          <Link href="/stellar-rwa" className="group mt-6 flex items-center gap-4 rounded-2xl bg-[#254839] px-5 py-4">
+          <Link href="/" className="group mt-6 flex items-center gap-4 rounded-2xl bg-[#254839] px-5 py-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={asset('/agama-logo-circle.svg')} alt="" className="h-10 w-10" />
             <div>

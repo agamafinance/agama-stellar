@@ -1,0 +1,43 @@
+# Agama on Stellar
+
+> Deposit a tokenized stock, get more of it back. A holder of a tokenized share can only hold it;
+> Agama turns it into a position that grows. Live on Stellar testnet at
+> https://app.agama.finance, contracts in Soroban, lending on Blend, prices from RedStone.
+
+## What it does
+
+- **Earn.** Deposit a stock. The protocol borrows USDC against it on Blend at the level you pick and
+  puts that USDC to work in a private-credit vault. Permissionless agents hold the level as the price
+  moves and turn the vault yield back into more of the same stock, so what grows is the share count.
+- **Amplify.** Deposit a stock and hold a multiple of it. The protocol borrows against the deposit,
+  buys more of the same stock and pledges it. A multiple of L carries an LTV of (L-1)/L, so the
+  market's own ceiling caps it at 3.33x at 70%.
+- **A falling price is repaid out of the protocol's own buffer, never by selling the user's stock.**
+  That is the product: the collateral is what the user came here to keep.
+
+## How it is built
+
+- Five Soroban contracts in Rust: the core, one position contract per (owner, market, product), a
+  SEP-40 oracle that verifies RedStone signatures on chain, a stand-in credit vault where a deposit
+  lands and a withdrawal queues, and a SEP-41 stand-in stock token with a public faucet.
+- Lending is Blend v2, in an instance we deployed ourselves because the shared testnet pool can never
+  leave supply-only mode for us: its backstop is funded in BLND:USDC Comet LP and neither is ours to mint.
+- Prices are real RedStone reports, signed by three independent signers, rebuilt byte for byte by the
+  keeper and verified on chain by the oracle itself.
+- Wallets: Freighter, xBull, Albedo, and Nido passkey smart accounts. A Perch account cannot sign a
+  call into another contract, so every action renews a scoped session rule with the passkey and runs
+  under it, one confirmation per action.
+
+## Links
+
+- App: https://app.agama.finance
+- Code: https://github.com/agamafinance/agama-stellar
+- Amplify: https://app.agama.finance/stellar-rwa/amplify
+- Portfolio: https://app.agama.finance/stellar-rwa/portfolio
+- Faucet: https://app.agama.finance/stellar-rwa/faucet
+
+## Honest about testnet
+
+The shares, gold, BENJI and USDC are stand-ins this repository deploys and hands out, because no
+tokenized equity exists on Stellar yet: DTCC's is coming. The prices, the lending, the verification
+and the agents are real.
