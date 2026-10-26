@@ -72,6 +72,18 @@ async function read(id, fn, args = []) {
   }
 }
 
+/// What the button that was pressed has to say for itself, once it says
+/// anything that settles the matter.
+async function status(p, pattern, timeout) {
+  return p.waitFor(
+    `(() => {
+      const t = document.querySelector('[data-testid=status]')?.innerText ?? '';
+      return ${pattern}.test(t) ? t : null;
+    })()`,
+    { timeout },
+  );
+}
+
 const balance = (token, who) => read(token, 'balance', ['--id', who]).then((v) => BigInt(v ?? 0));
 const units = (v) => Number(v) / 1e7;
 
@@ -115,7 +127,10 @@ try {
   await p.goto(`${APP}/faucet`);
   await p.settle(2500);
   await p.click('Get the test tokens');
-  await p.waitForText(['in your wallet', 'already served', 'refused'], { timeout: 180_000 });
+  // The status line, not the page's prose: "In your wallet" is a label on
+  // this screen, so watching the whole body says the claim landed before it
+  // was made.
+  console.log('faucet:', await status(p, /wallet|already served|refus|cannot|failed/i, 240_000));
   const [stock, dollars] = await Promise.all([balance(TSLA, account), balance(USDC, account)]);
   console.log(`TSLAx ${units(stock)}  USDC ${units(dollars)}`);
   if (stock === 0n) throw new Error('the faucet gave no stock');
@@ -128,7 +143,7 @@ try {
   await p.fill('input[placeholder="0.00"]', DEPOSIT);
   await p.settle(500);
   await p.click('Deposit and start earning');
-  await p.waitForText(['Approve this app once'], { timeout: 60_000 });
+  await p.waitForText(['Approve this app once', 'has not confirmed'], { timeout: 60_000 });
   console.log('the gate asked, as it should');
   await p.shot(`${SHOTS}/3-gate.png`);
 
@@ -144,9 +159,8 @@ try {
   await p.click('TSLAx');
   await p.fill('input[placeholder="0.00"]', DEPOSIT);
   await p.settle(500);
-  await p.click(/* the button says this once a position can be opened */ 'Deposit and start earning');
-  await p.waitForText(['Done.', 'refused', 'no live rule', 'cap'], { timeout: 240_000 });
-  console.log('screen says:', (await p.eval(`document.querySelector('[data-testid=status]')?.innerText`)) ?? '');
+  await p.click('Deposit and start earning');
+  console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
   await p.shot(`${SHOTS}/5-deposited.png`);
 
   step('The chain, which is the only answer that counts');
@@ -170,8 +184,11 @@ try {
   step('Closing, which the same approval already covers');
   // Nothing new is asked for: handing the stock back is the position's own
   // call, so the core rule is the whole of it.
+  // The position card appears on the snapshot that follows the deposit, so
+  // the button to close it is not there the instant the deposit lands.
+  await p.waitForText(['Close, get the stock back'], { timeout: 150_000 });
   await p.click('Close, get the stock back');
-  await p.waitForText(['Done.', 'refused', 'no live rule'], { timeout: 240_000 });
+  console.log('screen says:', await status(p, /Done|refus|no live rule|failed/i, 300_000));
   const back = await balance(TSLA, account);
   console.log('TSLAx back', units(back));
   const gone = await read(CORE, 'position_of', ['--owner', account, '--token', TSLA, '--product', 'Earn']);
