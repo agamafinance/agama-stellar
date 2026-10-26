@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Stock } from '@/lib/stellar/config';
 import { useStellarWallet } from '@/lib/stellar/WalletProvider';
+import { restoreScroll } from '@/lib/stellar/scroll';
 
 type Armed = import('@/lib/nido/agama').Armed;
 type SessionStatus = import('@/lib/nido/agama').SessionStatus;
@@ -93,23 +94,6 @@ export function useNidoSession(stock?: Stock): Session {
   }, [address, refresh]);
 
   return { status, smart, note, busy, check, forget, refresh };
-}
-
-/// Put the page back where the owner left it.
-///
-/// The ceremony is a whole page navigation, so the browser brings them back at
-/// the top while the thing they were doing is halfway down, and the result
-/// lands off screen. The page is also too short to scroll at that moment,
-/// because the snapshot has not arrived yet, so this keeps asking until the
-/// page is tall enough to answer and stops as soon as it does.
-function restoreScroll(y?: number) {
-  if (!y) return;
-  const until = Date.now() + 5000;
-  const tick = () => {
-    window.scrollTo(0, y);
-    if (Math.abs(window.scrollY - y) > 2 && Date.now() < until) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
 }
 
 /// Run the action the owner just signed for.

@@ -149,9 +149,10 @@ try {
   await p.click('Deposit and start earning');
   // Where the page was when the button was pressed. The ceremony is a whole
   // navigation, so coming back at the top would put the result off screen.
-  const was = Number(await p.eval('Math.round(window.scrollY)'));
+  const at = `Math.round(document.querySelector('.frame-panel > div')?.scrollTop ?? window.scrollY)`;
+  const was = Number(await p.eval(at));
   await walkGrants(p);
-  const now = Number(await p.eval('Math.round(window.scrollY)'));
+  const now = Number(await p.eval(at));
   console.log(`scroll     left at ${was}, came back at ${now}`);
   if (was > 100 && Math.abs(now - was) > 80) throw new Error('the page came back somewhere else');
   console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));

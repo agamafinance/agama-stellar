@@ -62,8 +62,9 @@ export async function open({ dir, headed = false } = {}) {
     chrome,
     [
       ...(headed ? [] : ['--headless=new']),
-      // Big enough that a screenshot shows a card rather than a slice of one.
-      '--window-size=1400,1700',
+      // A laptop, so the page scrolls the way a person's does. Screenshots
+      // still show the whole page: captureBeyondViewport does that part.
+      '--window-size=1400,900',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
       '--no-first-run',

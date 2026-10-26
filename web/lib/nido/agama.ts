@@ -21,6 +21,7 @@
 import { Account, Contract, StrKey, TransactionBuilder, rpc, scValToNative, xdr } from '@stellar/stellar-sdk';
 
 import { CORE, PASSPHRASE, RPC, type Stock } from '@/lib/stellar/config';
+import { scrollNow } from '@/lib/stellar/scroll';
 import {
   ensureSessionKey,
   loadSession,
@@ -168,7 +169,7 @@ export const dropArmed = () => localStorage.removeItem(ARMED);
 /// Send the owner to Nido to sign this action, and remember what it was.
 /// Navigates away: nothing after this runs.
 export function signFor(account: string, fn: string, stock: Stock | undefined, armed: Armed) {
-  arm({ scroll: Math.round(window.scrollY), ...armed });
+  arm({ scroll: scrollNow(), ...armed });
   return requestSession({
     account,
     grants: grantsToSign(account, fn, stock),
