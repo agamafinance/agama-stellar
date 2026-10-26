@@ -71,6 +71,18 @@
       "target_bps": 7000,
       "open": false,
       "at": 5395633
+    },
+    "CCR3K3X5DDX6HKHGSKLX7OH4M2PFYHWVHZEN6DYHKZK4JUKT7FQTNKY4": {
+      "open": false,
+      "at": 5391382
+    },
+    "CCZ644SJDPUPBVEKNTTIYOK5S3CIAAFASQEXUI4YJUQIRBCSUSJ6E4YT": {
+      "owner": "GAA4CX7FG7NLFIUZNIUFSFD45QERCYN7IEGYWAL4CN2GVIE325F3UREB",
+      "market": "CAJWQP6AK2LDCYVOVSBEJO4S3DWB65YFMMGAZHMNKB2FSHTYQFLUXJRJ",
+      "product": "Amplify",
+      "target_bps": 6667,
+      "open": false,
+      "at": 5391418
     }
   }
 }
