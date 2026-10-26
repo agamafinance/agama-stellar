@@ -105,9 +105,81 @@ export function grantsFor(fn: string, s?: Stock): Grant[] {
   return needsStock && s ? [coreGrant(), stockGrant(s)] : [coreGrant()];
 }
 
-/// Everything a visitor would ever be asked for on one market, in one pass, so
-/// the gate can offer a single approval instead of one per button.
+/// What the owner signs before this call runs, every single time.
+///
+/// A Perch account cannot sign a call into another contract, so there is
+/// nothing for a passkey to confirm at the moment of a deposit. What it can
+/// sign is the rule that allows the call, and asking again for a label
+/// replaces that rule. So an action that renews its own rule is a passkey
+/// confirmation per action, with the account enforcing the same rule on chain
+/// a moment later.
+///
+/// Which rule, and why it is this one: the rule a deposit renews is the
+/// stock's, because that one carries a cap and Nido fills the amount in. The
+/// core's rule carries none, and an uncapped rule makes Nido ask the owner to
+/// accept that explicitly, so it is renewed only when a call has nothing else
+/// to renew or when it is not there at all.
+export function grantsToSign(account: string, fn: string, s?: Stock): Grant[] {
+  const core = coreGrant();
+  const held = sessionStatus(account, [core]).state === 'ready';
+  if ((fn === 'earn_deposit' || fn === 'amplify_open') && s) {
+    const token = stockGrant(s);
+    return held ? [token] : [token, core];
+  }
+  return [core];
+}
+
+/// An action waiting on the other side of a passkey ceremony.
+///
+/// The ceremony is a page navigation, so the click that started it is gone by
+/// the time the owner comes back. This is what the screen rebuilds it from.
+export type Armed = {
+  account: string;
+  fn: string;
+  symbol?: string;
+  /// Base units, as a string, because this goes through JSON.
+  amount?: string;
+  ltv?: number;
+};
+
+const ARMED = 'agama-stellar:nido-armed';
+
+export function arm(a: Armed) {
+  localStorage.setItem(ARMED, JSON.stringify(a));
+}
+
+/// The armed action, once. Reading it clears it: coming back to this page
+/// later, or reloading it, must not make a deposit nobody asked for twice.
+export function takeArmed(): Armed | null {
+  const raw = localStorage.getItem(ARMED);
+  localStorage.removeItem(ARMED);
+  try {
+    return raw ? (JSON.parse(raw) as Armed) : null;
+  } catch {
+    return null;
+  }
+}
+
+export const dropArmed = () => localStorage.removeItem(ARMED);
+
+/// Send the owner to Nido to sign this action, and remember what it was.
+/// Navigates away: nothing after this runs.
+export function signFor(account: string, fn: string, stock: Stock | undefined, armed: Armed) {
+  arm(armed);
+  return requestSession({
+    account,
+    grants: grantsToSign(account, fn, stock),
+    base: NIDO_BASE,
+    friendbotUrl,
+  });
+}
+
+/// Every rule a market can ever need, for showing what is standing.
 export const allGrants = (s: Stock): Grant[] => [coreGrant(), stockGrant(s)];
+
+/// The protocol's own rule, which every screen needs and the faucet page is
+/// the only one with no market to go with it.
+export const protocolGrant = (): Grant[] => [coreGrant()];
 
 /// Thrown when a call is not covered yet. The screen catches it and shows the
 /// gate rather than a failure: nothing was sent and nothing was paid.

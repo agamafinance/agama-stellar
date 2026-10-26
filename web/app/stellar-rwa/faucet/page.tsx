@@ -9,6 +9,7 @@ import { asset, CORE, STOCKS } from '@/lib/stellar/config';
 import { useStellarWallet } from '@/lib/stellar/WalletProvider';
 import { errorText, ix, send, usd, useSnapshot } from '@/lib/stellar/useStellar';
 import { Status, Step } from '@/components/stellar/ui';
+import { NidoGate, useNidoReturn, useNidoSession } from '@/components/stellar/NidoGate';
 
 // The one thing here nobody can mint for the visitor.
 const XLM_FAUCET = 'https://lab.stellar.org/account/fund';
@@ -34,12 +35,12 @@ export default function StellarFaucetPage() {
   /// account: the signed faucet asks the holder to authorise twelve separate
   /// contracts, which for such an account is twelve confirmations before
   /// anything arrives. This asks for none.
-  async function claim() {
+  async function claim(signed = false) {
     if (!address) return connect();
     setBusy(true);
     setStatus({ text: 'Building the transaction...' });
     try {
-      const hash = await send(address, ix.faucet(address), sign, (text) => setStatus({ text }));
+      const hash = await send(address, ix.faucet(address), sign, (text) => setStatus({ text }), signed);
       setStatus({ text: '10,000 USDC and 10 of each stock are in your wallet.', hash });
     } catch (e) {
       setStatus({ text: errorText(e) });
@@ -48,6 +49,13 @@ export default function StellarFaucetPage() {
       void refresh();
     }
   }
+
+  // A smart account signs for the drip like it signs for everything else, and
+  // comes back here to take it.
+  const session = useNidoSession();
+  useNidoReturn((armed) => {
+    if (armed.fn === 'faucet_for') void claim(true);
+  });
 
   const xlm = snap && address ? snap.xlm : undefined;
   // A smart account does not pay its own fees here, so an empty one is not a
@@ -64,7 +72,7 @@ export default function StellarFaucetPage() {
           <div aria-hidden className="pointer-events-none absolute right-4 top-2 z-20 hidden lg:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={asset('/stellar-rwa.svg')}
+              src={asset('/stellar.svg')}
               alt=""
               className="h-[170px] w-[170px] drop-shadow-[0_18px_30px_rgba(20,50,35,0.25)]"
             />
@@ -112,7 +120,7 @@ export default function StellarFaucetPage() {
             <StepRow
               icon={
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={asset('/stellar-rwa.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
+                <img src={asset('/stellar.svg')} alt="" className="h-10 w-10 shrink-0 rounded-full" />
               }
               title="XLM for fees"
               blurb="Stellar testnet transactions are paid in XLM, and opening a position deploys a contract, so it wants rather more than a transfer would. Friendbot hands out 10,000 at a time; it is the one thing here nobody can mint for you."
@@ -133,7 +141,7 @@ export default function StellarFaucetPage() {
             blurb="10,000 USDC, and 10 each of TSLAx, NVDAx, AAPLx, MSFTx, AMZNx, GOOGLx, METAx, SPYx, BENJI and GOLDx. Eleven tokens, one call, and nothing to approve."
           >
             <MintButton
-              onClick={address ? claim : () => connect()}
+              onClick={address ? () => claim() : () => connect()}
               busy={busy}
               label={address ? 'Get the test tokens' : 'Connect a wallet'}
               busyLabel={status?.text}
@@ -164,6 +172,7 @@ export default function StellarFaucetPage() {
             </button>
           </p>
           {!busy && <Status text={status?.text} hash={status?.hash} />}
+          <NidoGate session={session} />
 
           <Link href="/stellar-rwa" className="group mt-6 flex items-center gap-4 rounded-2xl bg-[#254839] px-5 py-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -108,7 +108,15 @@ export function useSnapshot(owner: string | null) {
 /// The market is here because a smart account has to approve one rule per
 /// contract a call authorises, and only the call site knows which stock's
 /// token that is.
-export type Call = { id: string; fn: string; args: xdr.ScVal[]; stock?: Stock };
+export type Call = {
+  id: string;
+  fn: string;
+  args: xdr.ScVal[];
+  stock?: Stock;
+  /// What a smart account's screen rebuilds this call from when the owner
+  /// comes back from signing it with their passkey.
+  arm?: { fn: string; symbol?: string; amount?: string; ltv?: number };
+};
 
 /// Build, simulate, sign, send, wait.
 ///
@@ -127,17 +135,23 @@ export async function send(
   call: Call,
   sign: (xdr: string) => Promise<string>,
   progress?: (text: string) => void,
+  /// True when the owner has just signed for this call and it should run
+  /// rather than ask again. Only a smart account reads it.
+  armed = false,
 ): Promise<string> {
   if (StrKey.isValidContract(source)) {
-    const { grantsFor, invokeViaSession } = await import('@/lib/nido/agama');
-    return invokeViaSession(
-      source,
-      call.id,
-      call.fn,
-      call.args,
-      grantsFor(call.fn, call.stock),
-      progress,
-    );
+    const nido = await import('@/lib/nido/agama');
+    if (!armed) {
+      // Ask for the passkey first, every time. A Perch account cannot sign a
+      // call into another contract, so what the owner confirms is the rule
+      // that allows this one, and renewing it is that confirmation. This
+      // navigates to Nido and comes back to a page that runs the call.
+      progress?.('Asking Nido for your passkey...');
+      return nido.signFor(source, call.fn, call.stock, { account: source, ...call.arm, fn: call.fn });
+    }
+    // Back from the ceremony with the rule just renewed, so the call goes
+    // straight through, signed in the page by this app's key.
+    return nido.invokeViaSession(source, call.id, call.fn, call.args, [], progress);
   }
 
   progress?.('Preparing the transaction...');
@@ -188,37 +202,47 @@ export const ix: Record<string, (...a: never[]) => Call> & {
   /// the one the screen uses because it is the only one a smart account can
   /// face: the signed version asks the holder to authorise twelve contracts,
   /// which for a passkey account is twelve confirmations.
-  faucet: (user: string) => ({ id: CORE, fn: 'faucet_for', args: [addr(user)] }),
+  faucet: (user: string) => ({
+    id: CORE,
+    fn: 'faucet_for',
+    args: [addr(user)],
+    arm: { fn: 'faucet_for' },
+  }),
   faucetOne: (user: string, s: Stock) => ({ id: s.token, fn: 'faucet', args: [addr(user)], stock: s }),
   earnDeposit: (user: string, s: Stock, amount: bigint, ltvBps: number) => ({
     id: CORE,
     fn: 'earn_deposit',
     args: [addr(user), addr(s.token), i128(amount), u32(ltvBps)],
     stock: s,
+    arm: { fn: 'earn_deposit', symbol: s.symbol, amount: String(amount), ltv: ltvBps },
   }),
   earnSetTarget: (user: string, s: Stock, ltvBps: number) => ({
     id: CORE,
     fn: 'earn_set_target',
     args: [addr(user), addr(s.token), u32(ltvBps)],
     stock: s,
+    arm: { fn: 'earn_set_target', symbol: s.symbol, ltv: ltvBps },
   }),
   earnClose: (user: string, s: Stock) => ({
     id: CORE,
     fn: 'earn_close',
     args: [addr(user), addr(s.token)],
     stock: s,
+    arm: { fn: 'earn_close', symbol: s.symbol },
   }),
   amplifyOpen: (user: string, s: Stock, amount: bigint, ltvBps: number) => ({
     id: CORE,
     fn: 'amplify_open',
     args: [addr(user), addr(s.token), i128(amount), u32(ltvBps)],
     stock: s,
+    arm: { fn: 'amplify_open', symbol: s.symbol, amount: String(amount), ltv: ltvBps },
   }),
   amplifyClose: (user: string, s: Stock) => ({
     id: CORE,
     fn: 'amplify_close',
     args: [addr(user), addr(s.token)],
     stock: s,
+    arm: { fn: 'amplify_close', symbol: s.symbol },
   }),
 };
 

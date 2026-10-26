@@ -87,10 +87,27 @@ export async function open({ dir, headed = false } = {}) {
 
   let nextId = 0;
   const pending = new Map();
-  const send = (method, params = {}, sessionId) =>
+  /// Every call is given a deadline. A session that went away mid-question
+  /// never answers, and a driver that waits for it forever looks exactly like
+  /// a page that is taking its time.
+  const send = (method, params = {}, sessionId, timeout = 20_000) =>
     new Promise((resolve, reject) => {
       const id = ++nextId;
-      pending.set(id, { resolve, reject, method });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method} did not answer in ${timeout}ms`));
+      }, timeout);
+      pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+        method,
+      });
       ws.send(JSON.stringify({ id, method, params, sessionId }));
     });
 
@@ -343,8 +360,15 @@ function note(method, params) {
       const sessionId = await waitFor(
         async () => {
           for (const [id] of pages) {
-            const where = await page(id)
-              .here()
+            // Two seconds, not twenty: a page that closed while this was
+            // asking is the common case here, not an error worth waiting on.
+            const where = await send(
+              'Runtime.evaluate',
+              { expression: 'location.href', returnByValue: true },
+              id,
+              2000,
+            )
+              .then((r) => String(r.result?.value ?? ''))
               .catch(() => '');
             if (where.includes(hostPart)) return id;
           }

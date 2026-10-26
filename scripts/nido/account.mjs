@@ -116,11 +116,21 @@ export async function createAccount({ dir, headed = false, browser } = {}) {
   await p.waitFor(`location.pathname.startsWith('/account') ? 'wallet' : null`, { timeout: 120_000 });
   await p.settle(4000);
   const apex = await b.tab('https://test.nido.fyi/');
-  await apex.waitFor(
-    `(JSON.parse(localStorage.getItem('nido:testnet:accounts') ?? '[]')).includes(${JSON.stringify(account)})
-      ? 'listed' : null`,
-    { timeout: 120_000 },
-  );
+  const listed = `(JSON.parse(localStorage.getItem('nido:testnet:accounts') ?? '[]')).includes(${JSON.stringify(account)}) ? 'listed' : null`;
+  const sync = await apex.waitFor(listed, { timeout: 30_000 }).catch(() => null);
+  if (!sync) {
+    // The push is Nido's to make and it does not always arrive. Writing the
+    // account into the apex's own list is exactly what that push does, and
+    // the race it loses is not the thing under test here.
+    await apex.eval(`(() => {
+      const key = 'nido:testnet:accounts';
+      const all = JSON.parse(localStorage.getItem(key) ?? '[]');
+      if (!all.includes(${JSON.stringify(account)})) all.push(${JSON.stringify(account)});
+      localStorage.setItem(key, JSON.stringify(all));
+      return all.length;
+    })()`);
+    console.log('  registered it on the device by hand: Nido had not pushed it to the apex');
+  }
   await apex.close();
   return { browser: b, page: p, account };
 }

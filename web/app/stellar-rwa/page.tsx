@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { AGENT_OPS, asset, BPS, DECIMALS } from '@/lib/stellar/config';
+import { AGENT_OPS, asset, BPS, DECIMALS, STOCKS } from '@/lib/stellar/config';
 import { useStellarWallet } from '@/lib/stellar/WalletProvider';
 import {
   ago, errorText, ix, pct, px, qty, send, stockValue, usd, useSnapshot, type Call,
@@ -11,7 +11,7 @@ import {
   AgentsCard, AmountBox, card, Hero, MarketCards, Panel, parseAmount, PriceBadge, primaryBtn,
   Row, secondaryBtn, SessionBadge, Stat, Status, Step, toDecimal,
 } from '@/components/stellar/ui';
-import { NidoGate, useNidoSession } from '@/components/stellar/NidoGate';
+import { NidoCapNote, NidoGate, useNidoReturn, useNidoSession } from '@/components/stellar/NidoGate';
 
 export default function StellarEarnPage() {
   const { address, connect, sign } = useStellarWallet();
@@ -53,27 +53,45 @@ export default function StellarEarnPage() {
   const borrowed = m ? (stockValue(amt, BigInt(m.price)) * BigInt(ltv)) / BPS : 0n;
   const healthAtOpen = m && ltv > 0 ? (m.threshold / ltv).toFixed(2) : '-';
 
-  async function run(where: 'deposit' | 'close' | 'slider', call: Call, msg: string) {
+  async function run(where: 'deposit' | 'close' | 'slider', call: Call, msg: string, signed = false) {
     if (!address) return setStatus({ text: 'Connect a wallet first.', where });
-    if (!m) return setStatus({ text: 'Markets are still loading.', where });
     setBusy(true);
     setStatus({ text: msg, where });
     try {
-      const hash = await send(address, call, sign, (text) => setStatus({ text, where }));
+      const hash = await send(address, call, sign, (text) => setStatus({ text, where }), signed);
       setStatus({ text: 'Done.', hash, where });
       if (where === 'deposit') setAmount('');
     } catch (e) {
-      // A smart account with no rule for this yet is not a failure: nothing
-      // was sent and nothing was paid. The gate below is what it needs.
-      if (e instanceof Error && e.name === 'NeedsSession') {
-        session.refresh();
-        setStatus({ text: 'This needs your approval once. It is just below.', where });
-      } else setStatus({ text: errorText(e), where });
+      setStatus({ text: errorText(e), where });
     } finally {
       setBusy(false);
       void refresh();
     }
   }
+
+  // Back from the passkey ceremony: put the screen back the way it was and
+  // make the call that was asked for before it took the page away.
+  useNidoReturn((armed) => {
+    const stock = STOCKS.find((x) => x.symbol === armed.symbol);
+    if (!stock || !address) return;
+    const i = STOCKS.indexOf(stock);
+    if (i >= 0) setSel(i);
+    setOpened(true);
+    if (armed.ltv) setPicked(armed.ltv);
+    if (armed.fn === 'earn_deposit' && armed.amount) {
+      setAmount(toDecimal(BigInt(armed.amount), DECIMALS));
+      void run(
+        'deposit',
+        ix.earnDeposit(address, stock, BigInt(armed.amount), armed.ltv ?? 0),
+        'Depositing and borrowing...',
+        true,
+      );
+    } else if (armed.fn === 'earn_set_target' && armed.ltv) {
+      void run('slider', ix.earnSetTarget(address, stock, armed.ltv), 'Moving the position...', true);
+    } else if (armed.fn === 'earn_close') {
+      void run('close', ix.earnClose(address, stock), 'Closing...', true);
+    }
+  });
 
   const deposit = () =>
     run('deposit', ix.earnDeposit(address!, m!.stock, amt, ltv), 'Depositing and borrowing...');
@@ -133,12 +151,6 @@ export default function StellarEarnPage() {
               <h2 className="text-[17px] font-semibold text-fg">Deposit {m?.stock.ticker ?? ''}</h2>
               <SessionBadge m={m} />
             </div>
-
-            {session.smart && !session.ready && (
-              <div className="mt-4">
-                <NidoGate session={session} stock={m?.stock} />
-              </div>
-            )}
 
             <AmountBox
               label="Deposit"
@@ -207,11 +219,8 @@ export default function StellarEarnPage() {
                           : 'Deposit and start earning'}
             </button>
             {!busy && status?.where === 'deposit' && <Status text={status.text} hash={status.hash} />}
-            {session.smart && session.ready && (
-              <div className="mt-2">
-                <NidoGate session={session} stock={m?.stock} />
-              </div>
-            )}
+            <NidoGate session={session} />
+            <NidoCapNote stock={m?.stock} />
           </div>
 
           <div className={card}>

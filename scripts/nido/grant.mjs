@@ -13,8 +13,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
  * A state machine rather than a sequence: look at the page, do the one thing
  * that page needs, and stop when the app says the session is live.
  */
-export async function walkGrants(p, { timeout = 420_000 } = {}) {
+export async function walkGrants(p, { timeout = 420_000, start = 120_000 } = {}) {
   const seen = new Set();
+  // Wait for the ceremony to begin before reading the page: the first action
+  // of a session also makes this app's key and waits on Friendbot to fund it,
+  // so several seconds pass on the app's own page before anything navigates.
+  // Treating that as "already back" ends the walk before it starts.
+  await p.waitFor(`location.host.includes('nido.fyi') ? 'nido' : null`, { timeout: start });
   const until = Date.now() + timeout;
   while (Date.now() < until) {
     const where = await p.here().catch(() => '');
@@ -49,17 +54,11 @@ export async function walkGrants(p, { timeout = 420_000 } = {}) {
       await p.clickId('approve').catch(() => {});
       await sleep(4000);
     } else {
-      // Back on the app: either it is sending the owner on to the next rule,
-      // or there are none left.
-      const state = await p
-        .eval(
-          `document.body.innerText.includes('Signing with your passkey approval') ? 'ready'
-           : document.body.innerText.match(/has not confirmed|Nothing was approved|budget is spent/)?.[0] ?? null`,
-        )
-        .catch(() => null);
-      if (state === 'ready') return seen;
-      if (state) throw new Error(`Nido did not apply a rule: ${state}`);
-      await sleep(2000);
+      // Back on the app. Either it is on its way to another rule, or the
+      // ceremony is over and the page is running what the owner signed for.
+      await sleep(3000);
+      const now = await p.here().catch(() => '');
+      if (!/nido\.fyi/.test(now)) return seen;
     }
   }
   throw new Error('the grant ceremonies did not finish in time');

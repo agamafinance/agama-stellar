@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { AGENT_OPS, asset, BPS, DECIMALS } from '@/lib/stellar/config';
+import { AGENT_OPS, asset, BPS, DECIMALS, STOCKS } from '@/lib/stellar/config';
 import { useStellarWallet } from '@/lib/stellar/WalletProvider';
 import {
   ago, errorText, ix, pct, px, qty, send, stockValue, usd, useSnapshot, type Call,
@@ -11,7 +11,7 @@ import {
   AgentsCard, AmountBox, card, Hero, MarketCards, Panel, parseAmount, PriceBadge, primaryBtn,
   Row, secondaryBtn, SessionBadge, Stat, Status, Step, toDecimal,
 } from '@/components/stellar/ui';
-import { NidoGate, useNidoSession } from '@/components/stellar/NidoGate';
+import { NidoCapNote, NidoGate, useNidoReturn, useNidoSession } from '@/components/stellar/NidoGate';
 
 export default function StellarAmplifyPage() {
   const { address, connect, sign } = useStellarWallet();
@@ -57,25 +57,41 @@ export default function StellarAmplifyPage() {
   const borrow = m ? stockValue(bought, BigInt(m.price)) : 0n;
   const ltvAfter = levBps > 10_000 ? Math.floor(((levBps - 10_000) * 10_000) / levBps) : 0;
 
-  async function run(where: 'open' | 'close', call: Call, msg: string) {
+  async function run(where: 'open' | 'close', call: Call, msg: string, signed = false) {
     if (!address) return setStatus({ text: 'Connect a wallet first.', where });
-    if (!m) return setStatus({ text: 'Markets are still loading.', where });
     setBusy(true);
     setStatus({ text: msg, where });
     try {
-      const hash = await send(address, call, sign, (text) => setStatus({ text, where }));
+      const hash = await send(address, call, sign, (text) => setStatus({ text, where }), signed);
       setStatus({ text: 'Done.', hash, where });
       if (where === 'open') setAmount('');
     } catch (e) {
-      if (e instanceof Error && e.name === 'NeedsSession') {
-        session.refresh();
-        setStatus({ text: 'This needs your approval once. It is just below.', where });
-      } else setStatus({ text: errorText(e), where });
+      setStatus({ text: errorText(e), where });
     } finally {
       setBusy(false);
       void refresh();
     }
   }
+
+  // Back from the passkey ceremony: the loop the owner signed for, run.
+  useNidoReturn((armed) => {
+    const stock = STOCKS.find((x) => x.symbol === armed.symbol);
+    if (!stock || !address) return;
+    const i = STOCKS.indexOf(stock);
+    if (i >= 0) setSel(i);
+    setOpened(true);
+    if (armed.fn === 'amplify_open' && armed.amount && armed.ltv) {
+      setAmount(toDecimal(BigInt(armed.amount), DECIMALS));
+      void run(
+        'open',
+        ix.amplifyOpen(address, stock, BigInt(armed.amount), armed.ltv),
+        'Looping...',
+        true,
+      );
+    } else if (armed.fn === 'amplify_close') {
+      void run('close', ix.amplifyClose(address, stock), 'Unwinding...', true);
+    }
+  });
 
   const health =
     position && BigInt(position.debt) > 0n
@@ -120,11 +136,6 @@ export default function StellarAmplifyPage() {
               <h2 className="text-[17px] font-semibold text-fg">Loop {m?.stock.ticker ?? ''}</h2>
               <SessionBadge m={m} />
             </div>
-            {session.smart && !session.ready && (
-              <div className="mt-4">
-                <NidoGate session={session} stock={m?.stock} />
-              </div>
-            )}
             {position ? (
               <p className="mt-4 text-[14px] text-fg-muted">
                 You already have a loop on {m?.stock.ticker}. Close it to open a new one at a different multiple.
@@ -208,11 +219,8 @@ export default function StellarAmplifyPage() {
               </>
             )}
             {!busy && status?.where === 'open' && <Status text={status.text} hash={status.hash} />}
-            {session.smart && session.ready && (
-              <div className="mt-2">
-                <NidoGate session={session} stock={m?.stock} />
-              </div>
-            )}
+            <NidoGate session={session} />
+            <NidoCapNote stock={m?.stock} />
           </div>
 
           <div className={card}>

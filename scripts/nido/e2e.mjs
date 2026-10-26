@@ -123,44 +123,30 @@ try {
   console.log('connected as', short);
   await p.shot(`${SHOTS}/1-connected.png`);
 
-  step('The faucet, which asks the account for nothing at all');
+  step('The faucet, which the owner signs for like everything else');
   await p.goto(`${APP}/faucet`);
   await p.settle(2500);
   await p.click('Get the test tokens');
-  // The status line, not the page's prose: "In your wallet" is a label on
-  // this screen, so watching the whole body says the claim landed before it
-  // was made.
+  // One passkey, on the rule that lets this app call the protocol, and then
+  // the drip runs by itself on the way back.
+  await walkGrants(p);
   console.log('faucet:', await status(p, /wallet|already served|refus|cannot|failed/i, 240_000));
   const [stock, dollars] = await Promise.all([balance(TSLA, account), balance(USDC, account)]);
   console.log(`TSLAx ${units(stock)}  USDC ${units(dollars)}`);
   if (stock === 0n) throw new Error('the faucet gave no stock');
   await p.shot(`${SHOTS}/2-funded.png`);
 
-  step('A deposit, which needs the session the account has not granted yet');
+  step('A deposit, signed with the passkey at the moment it is made');
   await p.goto(APP);
   await p.settle(3000);
   await p.click('TSLAx');
   await p.fill('input[placeholder="0.00"]', DEPOSIT);
   await p.settle(500);
   await p.click('Deposit and start earning');
-  await p.waitForText(['Approve this app once', 'has not confirmed'], { timeout: 60_000 });
-  console.log('the gate asked, as it should');
-  await p.shot(`${SHOTS}/3-gate.png`);
-
-  step('Two rules, approved with the passkey');
-  await p.click('Approve').catch(() => p.click('Ask Nido again'));
   await walkGrants(p);
+  console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
   const live = (await rules(account)).filter((r) => r.name.startsWith('agama'));
   console.log('rules now:', live.map((r) => `${r.name} (${r.policies.length} policies)`).join(', '));
-  if (live.length !== 2) throw new Error(`expected two rules, found ${live.length}`);
-
-  step('The same deposit, signed in the page with no prompt');
-  await p.settle(2000);
-  await p.click('TSLAx');
-  await p.fill('input[placeholder="0.00"]', DEPOSIT);
-  await p.settle(500);
-  await p.click('Deposit and start earning');
-  console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
   await p.shot(`${SHOTS}/5-deposited.png`);
 
   step('The chain, which is the only answer that counts');
@@ -181,19 +167,45 @@ try {
   const left = await balance(TSLA, account);
   console.log('TSLAx left', units(left));
 
-  step('Closing, which the same approval already covers');
-  // Nothing new is asked for: handing the stock back is the position's own
-  // call, so the core rule is the whole of it.
+  step('Closing, which asks for the passkey again');
   // The position card appears on the snapshot that follows the deposit, so
   // the button to close it is not there the instant the deposit lands.
   await p.waitForText(['Close, get the stock back'], { timeout: 150_000 });
   await p.click('Close, get the stock back');
+  await walkGrants(p);
   console.log('screen says:', await status(p, /Done|refus|no live rule|failed/i, 300_000));
   const back = await balance(TSLA, account);
   console.log('TSLAx back', units(back));
   const gone = await read(CORE, 'position_of', ['--owner', account, '--token', TSLA, '--product', 'Earn']);
   console.log('position  ', gone === null ? 'closed' : gone);
   await p.shot(`${SHOTS}/6-closed.png`);
+
+  step('Amplify, the other product, one passkey each way');
+  await p.goto(`${APP}/amplify`);
+  await p.settle(3000);
+  await p.click('TSLAx');
+  await p.fill('input[placeholder="0.00"]', DEPOSIT);
+  await p.settle(500);
+  await p.click('Amplify ');
+  await walkGrants(p);
+  console.log('screen says:', await status(p, /Done|refus|no live rule|cap|failed/i, 300_000));
+  const loop = await read(CORE, 'position_of', ['--owner', account, '--token', TSLA, '--product', 'Amplify']);
+  if (!loop || typeof loop !== 'string') throw new Error('no loop on chain');
+  const loopHealth = await read(CORE, 'health', ['--position', loop]);
+  const held = await read(loop, 'collateral');
+  console.log('loop      ', loop);
+  console.log('holding   ', `${units(BigInt(held))} TSLAx on a deposit of ${DEPOSIT}`);
+  console.log('ltv       ', `${loopHealth.ltv / 100}%`);
+  await p.shot(`${SHOTS}/7-amplified.png`);
+
+  await p.waitForText(['Close, sell what repays'], { timeout: 150_000 });
+  await p.click('Close, sell what repays');
+  await walkGrants(p);
+  console.log('screen says:', await status(p, /Done|refus|no live rule|failed/i, 300_000));
+  const unwound = await read(CORE, 'position_of', ['--owner', account, '--token', TSLA, '--product', 'Amplify']);
+  console.log('loop      ', unwound === null ? 'closed' : unwound);
+  console.log('TSLAx now ', units(await balance(TSLA, account)));
+  await p.shot(`${SHOTS}/8-unwound.png`);
 
   console.log(`\nAll of it, for an account whose owner holds a passkey and nothing else.`);
   console.log(`account  https://stellar.expert/explorer/testnet/contract/${account}`);
