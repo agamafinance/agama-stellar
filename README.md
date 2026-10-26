@@ -99,8 +99,10 @@ liquidation threshold; the off-hours buffer is what differs.
 
 ## Status
 
-Contracts land one at a time, each with its tests, and the git history is the
-record of what was true when. Nothing is deployed yet.
+Live on testnet, and the app is at
+[app.agama.finance/stellar-rwa](https://app.agama.finance/stellar-rwa). Contracts land one at a time, each
+with its tests, and the git history is the record of what was true when. `deployments/testnet.json` says
+which addresses a given commit was pointed at, including the two passes this one abandoned and why.
 
 ## Running it
 
@@ -138,7 +140,7 @@ Five layers, in the order they depend on each other.
   ✓ agents ran over every open position
 
 6. The app
-  ✓ /stellar /stellar/amplify /stellar/portfolio /stellar/faucet /api/snapshot
+  ✓ /stellar-rwa and its amplify, portfolio, faucet and snapshot routes
   ✓ all 10 markets priced and fresh through the app
 
   19 passed, 0 failed
@@ -152,8 +154,9 @@ cargo test                      the contracts
 ./scripts/blend.sh all          our own instance of Blend
 ./scripts/e2e.sh                an Earn, start to finish, on chain
 ./scripts/amplify-e2e.sh        an Amplify, the same
+node scripts/nido/e2e.mjs       the same, for a passkey smart account
 python3 keeper/run.py once      relay prices, then let the agents act
-cd web && pnpm dev              the app, on localhost:3010
+cd web && pnpm dev              the app, on localhost:3010/stellar-rwa
 ```
 
 ## The two products
@@ -184,6 +187,42 @@ Pledge before borrowing, repay before withdrawing. Blend checks health at the
 moment of each request rather than at the end of the transaction, so the other
 order is a loan standing briefly against collateral that has not arrived yet.
 
+
+## A wallet that is a contract, not a key
+
+[Nido](https://github.com/nidohq/nido) accounts are in the wallet picker next to Freighter and xBull. One is
+an OpenZeppelin Perch smart account: a contract with a passkey, no extension, no seed phrase, and no keypair
+anywhere. It is also the one wallet here that cannot simply sign a transaction, and that is worth stating
+plainly because it shapes three things in this repository.
+
+Its passkey signs under one rule, `admin`, scoped to the account itself, so **the sign popup cannot
+authorise a call into this protocol at all**: the account answers `#3002` or `#3014`. What works is a session
+key. The owner approves, once with their passkey, a Perch rule naming a key the app holds as a delegated
+signer on one contract, for one list of functions, for a day, under a cap if the app asked for one. Every
+call after that is signed in the page with no prompt, and the account enforces the rule on chain for each
+one.
+
+**One rule per contract in a call's authorisation tree.** A deposit is two: the core for the call, and the
+stock's token for the transfer the core makes out of the account. Closing is one, because what comes back is
+sent by the position. The cap goes on the token rule and nowhere else, because Perch meters a cap by what a
+`transfer` moves: capped, any other function is refused with `#3223`, and uncapped, no token function is
+allowed at all.
+
+**`faucet_for` was added to the core for this.** The signed faucet makes one signature cover eleven token
+faucets, each checking it on the way down; a smart account authorises one contract per rule, so the same
+click is twelve passkey confirmations before anything arrives. `faucet_for` asks nobody to authorise
+anything: the core is the stocks' admin so it mints them, and the dollar comes out of what it holds above the
+buffer, refilled from the dollar's own faucet.
+
+**Closing straight after opening was impossible, and only this found it.** A close repays the debt out of
+the buffer and files the refund against the position's vault balance. It asked for the whole debt, and a debt
+grows in Blend's d_rate by the second while a vault share price does not follow it, so the vault refused to
+burn shares that were not there. The request is now for what the position holds and the buffer carries the
+difference.
+
+`scripts/nido/` drives the whole of it from a machine: a passkey is a WebAuthn ceremony, so Chrome's virtual
+authenticator makes the account, connects it, takes the faucet, approves the rules, deposits and closes,
+against the real testnet and the real Nido. Two minutes, no fingerprint.
 
 ## What testnet made us build that mainnet would not
 
